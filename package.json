@@ -1,7 +1,7 @@
 {
-  "name": "personal-music-player",
+  "name": "raagam",
   "version": "1.0.0",
-  "description": "A simple, self-hosted music player to listen to your own library without ads, tracking, or premium subscriptions.",
+  "description": "Raagam - Your personal Telugu music player. No ads, no tracking, no subscriptions.",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",

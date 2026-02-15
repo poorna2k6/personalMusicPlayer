@@ -107,7 +107,7 @@ export default function App() {
           className="text-xl font-bold text-indigo-400 cursor-pointer"
           onClick={() => { setView('tracks'); setSearchQuery(''); loadData(); }}
         >
-          Music Player
+          Raagam
         </h1>
         <div className="flex items-center gap-4">
           <input
