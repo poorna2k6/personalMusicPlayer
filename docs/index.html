@@ -57,6 +57,9 @@
     </div>
   </div>
 
+  <!-- Theme Backdrop (for custom image theme) -->
+  <div id="theme-backdrop"></div>
+
   <!-- App Shell -->
   <div id="app" class="app hidden">
     <!-- Header -->
@@ -75,15 +78,15 @@
       <div id="view-home" class="view active">
         <div class="quick-picks" id="quick-picks"></div>
         <section class="section" id="section-trending">
-          <h2 class="section-title">Trending Now</h2>
+          <h2 class="section-title" id="trending-title">Trending Now</h2>
           <div class="scroll-row" id="trending-row"></div>
         </section>
-        <section class="section" id="section-telugu">
-          <h2 class="section-title">Telugu Hits</h2>
-          <div class="scroll-row" id="telugu-row"></div>
+        <section class="section" id="section-language">
+          <h2 class="section-title" id="language-title">Hits</h2>
+          <div class="scroll-row" id="language-row"></div>
         </section>
         <section class="section" id="section-bollywood">
-          <h2 class="section-title">Bollywood Vibes</h2>
+          <h2 class="section-title" id="bollywood-title">Bollywood Vibes</h2>
           <div class="scroll-row" id="bollywood-row"></div>
         </section>
         <section class="section" id="section-chill">
@@ -503,6 +506,56 @@
         <span></span>
       </div>
       <div class="settings-content">
+        <!-- Theme Picker -->
+        <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:10px;">
+          <span style="font-size:15px;font-weight:600;">Theme</span>
+          <div class="theme-picker" id="theme-picker">
+            <div class="theme-swatch active" data-theme="midnight">
+              <div class="theme-swatch-dot" style="background:#1DB954;"></div>
+              <span class="theme-swatch-name">Midnight</span>
+            </div>
+            <div class="theme-swatch" data-theme="abyss">
+              <div class="theme-swatch-dot" style="background:#3b82f6;"></div>
+              <span class="theme-swatch-name">Abyss</span>
+            </div>
+            <div class="theme-swatch" data-theme="sunset">
+              <div class="theme-swatch-dot" style="background:#f59e0b;"></div>
+              <span class="theme-swatch-name">Sunset</span>
+            </div>
+            <div class="theme-swatch" data-theme="forest">
+              <div class="theme-swatch-dot" style="background:#22c55e;"></div>
+              <span class="theme-swatch-name">Forest</span>
+            </div>
+            <div class="theme-swatch" data-theme="rose">
+              <div class="theme-swatch-dot" style="background:#f43f5e;"></div>
+              <span class="theme-swatch-name">Rose</span>
+            </div>
+            <div class="theme-swatch" data-theme="ocean">
+              <div class="theme-swatch-dot" style="background:#06b6d4;"></div>
+              <span class="theme-swatch-name">Ocean</span>
+            </div>
+            <div class="theme-swatch" data-theme="snow">
+              <div class="theme-swatch-dot" style="background:#7c3aed;"></div>
+              <span class="theme-swatch-name">Snow</span>
+            </div>
+            <div class="theme-swatch" data-theme="aurora">
+              <div class="theme-swatch-dot" style="background:#a855f7;"></div>
+              <span class="theme-swatch-name">Aurora</span>
+            </div>
+            <div class="theme-swatch" data-theme="custom-backdrop">
+              <div class="theme-swatch-dot" style="background:#888;"></div>
+              <span class="theme-swatch-name">My Photo</span>
+            </div>
+          </div>
+          <!-- Custom backdrop upload -->
+          <div class="backdrop-upload-area" id="backdrop-upload">
+            <span style="font-size:28px;">📷</span>
+            <p>Tap to choose a background image</p>
+            <input type="file" id="backdrop-file" accept="image/*" style="display:none;" />
+            <img class="backdrop-preview" id="backdrop-preview" alt="Preview" />
+            <button class="backdrop-remove-btn" id="backdrop-remove">Remove Image</button>
+          </div>
+        </div>
         <div class="setting-item">
           <span>Audio Quality</span>
           <select id="audio-quality">
@@ -510,6 +563,22 @@
             <option value="3" selected>Medium (160kbps)</option>
             <option value="2">Low (96kbps)</option>
             <option value="1">Data Saver (48kbps)</option>
+          </select>
+        </div>
+        <div class="setting-item">
+          <span>Language</span>
+          <select id="settings-language">
+            <option value="telugu">Telugu</option>
+            <option value="hindi">Hindi</option>
+            <option value="tamil">Tamil</option>
+            <option value="english">English</option>
+            <option value="kannada">Kannada</option>
+            <option value="malayalam">Malayalam</option>
+            <option value="punjabi">Punjabi</option>
+            <option value="bengali">Bengali</option>
+            <option value="marathi">Marathi</option>
+            <option value="gujarati">Gujarati</option>
+            <option value="bhojpuri">Bhojpuri</option>
           </select>
         </div>
         <div class="setting-item">
@@ -609,10 +678,24 @@
   <div id="profile-dialog" class="dialog-overlay hidden">
     <div class="dialog-box">
       <h2>Welcome to Raagam</h2>
-      <p style="color:#b3b3b3;margin-bottom:1rem;">Set up your profile (optional)</p>
+      <p style="color:#b3b3b3;margin-bottom:1rem;">Set up your profile</p>
       <form id="profile-form">
         <input type="text" id="user-name" placeholder="Your name" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:12px;font-size:16px;" />
-        <input type="tel" id="user-phone" placeholder="Phone (optional)" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:16px;font-size:16px;" />
+        <input type="tel" id="user-phone" placeholder="Phone (optional)" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:12px;font-size:16px;" />
+        <label style="display:block;color:#b3b3b3;font-size:13px;margin-bottom:6px;">Preferred Language</label>
+        <select id="user-language" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:16px;font-size:16px;appearance:auto;">
+          <option value="telugu">Telugu</option>
+          <option value="hindi">Hindi</option>
+          <option value="tamil">Tamil</option>
+          <option value="english">English</option>
+          <option value="kannada">Kannada</option>
+          <option value="malayalam">Malayalam</option>
+          <option value="punjabi">Punjabi</option>
+          <option value="bengali">Bengali</option>
+          <option value="marathi">Marathi</option>
+          <option value="gujarati">Gujarati</option>
+          <option value="bhojpuri">Bhojpuri</option>
+        </select>
         <button type="submit" style="width:100%;padding:12px;border-radius:24px;background:#1DB954;color:#000;font-weight:bold;border:none;font-size:16px;cursor:pointer;">Continue</button>
       </form>
       <button id="skip-profile" style="width:100%;padding:12px;margin-top:8px;background:transparent;border:1px solid #555;border-radius:24px;color:#fff;font-size:14px;cursor:pointer;">Skip for now</button>
