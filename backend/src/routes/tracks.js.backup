@@ -1,0 +1,294 @@
+const express = require('express');
+const router = express.Router();
+const { getDb } = require('../db');
+const fetch = require('node-fetch');
+
+// External API configurations
+const API_MIRRORS = [
+  'https://jiosaavn-api-privatecvc2.vercel.app',
+  'https://saavn-api.vercel.app',
+  'https://jiosaavn-api-2.vercel.app',
+  'https://saavn.dev/api'
+];
+
+// GET /api/tracks - List all tracks with optional filtering
+router.get('/', (req, res) => {
+  const db = getDb();
+  const { artist, album, genre, search, sort = 'title', order = 'asc' } = req.query;
+
+  let query = 'SELECT id, title, artist, album, duration, track_number, genre, year, file_path, file_name FROM tracks';
+  const conditions = [];
+  const params = [];
+
+  if (artist) {
+    conditions.push('artist = ?');
+    params.push(artist);
+  }
+  if (album) {
+    conditions.push('album = ?');
+    params.push(album);
+  }
+  if (genre) {
+    conditions.push('genre = ?');
+    params.push(genre);
+  }
+  if (search) {
+    conditions.push('(title LIKE ? OR artist LIKE ? OR album LIKE ?)');
+    const term = `%${search}%`;
+    params.push(term, term, term);
+  }
+
+  if (conditions.length > 0) {
+    query += ' WHERE ' + conditions.join(' AND ');
+  }
+
+  const allowedSorts = ['title', 'artist', 'album', 'duration', 'year', 'created_at'];
+  const sortCol = allowedSorts.includes(sort) ? sort : 'title';
+  const sortOrder = order === 'desc' ? 'DESC' : 'ASC';
+  query += ` ORDER BY ${sortCol} ${sortOrder}`;
+
+  const tracks = db.prepare(query).all(...params);
+  res.json(tracks);
+});
+
+// GET /api/tracks/artists - List all unique artists
+router.get('/artists', (req, res) => {
+  const db = getDb();
+  const artists = db.prepare(
+    'SELECT artist, COUNT(*) as track_count FROM tracks GROUP BY artist ORDER BY artist ASC'
+  ).all();
+  res.json(artists);
+});
+
+// GET /api/tracks/albums - List all unique albums
+router.get('/albums', (req, res) => {
+  const db = getDb();
+  const albums = db.prepare(
+    'SELECT album, artist, COUNT(*) as track_count, MIN(cover_art) as cover_art FROM tracks GROUP BY album, artist ORDER BY album ASC'
+  ).all();
+  res.json(albums);
+});
+
+// GET /api/tracks/:id - Get a single track
+router.get('/:id', (req, res) => {
+  const db = getDb();
+  const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(req.params.id);
+  if (!track) {
+    return res.status(404).json({ error: 'Track not found' });
+  }
+  res.json(track);
+});
+
+// GET /api/tracks/:id/cover - Get cover art for a track
+router.get('/:id/cover', (req, res) => {
+  const db = getDb();
+  const track = db.prepare('SELECT cover_art FROM tracks WHERE id = ?').get(req.params.id);
+  if (!track || !track.cover_art) {
+    return res.status(404).json({ error: 'No cover art available' });
+  }
+  // cover_art is stored as data URI, extract and send
+  const matches = track.cover_art.match(/^data:(.+);base64,(.+)$/);
+  if (matches) {
+    const buffer = Buffer.from(matches[2], 'base64');
+    res.set('Content-Type', matches[1]);
+    res.send(buffer);
+  } else {
+    res.status(404).json({ error: 'Invalid cover art data' });
+  }
+});
+
+// GET /api/tracks/search - Search songs from external APIs
+router.get('/search', async (req, res) => {
+  const { query, limit = 20, language = 'telugu' } = req.query;
+
+  if (!query) {
+    return res.status(400).json({ error: 'Query parameter is required' });
+  }
+
+  try {
+    // Try each API mirror until one works
+    for (const apiUrl of API_MIRRORS) {
+      try {
+        const searchUrl = `${apiUrl}/search/songs?query=${encodeURIComponent(query)}&limit=${limit}&language=${language}`;
+        console.log('Trying API:', searchUrl);
+
+        const response = await fetch(searchUrl, {
+          timeout: 5000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; Raagam/1.0)'
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+
+          // Transform the response to our format
+          const songs = (data.data || data.results || []).map(song => ({
+            id: song.id || song.song_id,
+            title: song.name || song.title || song.song,
+            artist: song.primaryArtists || song.artist || song.singers,
+            album: song.album?.name || song.album_name || 'Unknown Album',
+            duration: song.duration || song.length || 0,
+            language: song.language || language,
+            year: song.year || song.release_year,
+            image: song.image || song.cover_art || song.thumbnail,
+            downloadUrl: song.downloadUrl || song.media_url,
+            url: song.url || song.perma_url,
+            source: 'external'
+          }));
+
+          return res.json({
+            success: true,
+            query,
+            total: songs.length,
+            songs
+          });
+        }
+      } catch (error) {
+        console.log(`API ${apiUrl} failed:`, error.message);
+        continue;
+      }
+    }
+
+    // If all APIs failed
+    res.status(503).json({
+      error: 'All external APIs are currently unavailable',
+      query
+    });
+
+  } catch (error) {
+    console.error('Search error:', error);
+    res.status(500).json({ error: 'Search failed', details: error.message });
+  }
+});
+
+// GET /api/tracks/popular - Get popular/trending songs
+router.get('/popular', async (req, res) => {
+  const { language = 'telugu', limit = 20 } = req.query;
+
+  try {
+    // Try to get trending songs from external APIs
+    for (const apiUrl of API_MIRRORS) {
+      try {
+        const trendingUrl = `${apiUrl}/modules?language=${language}&includeMetaTags=1`;
+        console.log('Trying trending API:', trendingUrl);
+
+        const response = await fetch(trendingUrl, {
+          timeout: 5000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; Raagam/1.0)'
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+
+          // Extract trending songs from various modules
+          const trendingSongs = [];
+          const modules = data.data || {};
+
+          // Try different module types that might contain songs
+          ['trending', 'charts', 'new_releases', 'top_artists'].forEach(moduleKey => {
+            if (modules[moduleKey] && Array.isArray(modules[moduleKey])) {
+              modules[moduleKey].slice(0, 5).forEach(item => {
+                if (item.type === 'song' && trendingSongs.length < limit) {
+                  trendingSongs.push({
+                    id: item.id,
+                    title: item.name || item.title,
+                    artist: item.primaryArtists || item.artist,
+                    album: item.album?.name || 'Unknown Album',
+                    duration: item.duration || 0,
+                    language: item.language || language,
+                    image: item.image,
+                    downloadUrl: item.downloadUrl,
+                    url: item.url,
+                    source: 'external',
+                    category: moduleKey
+                  });
+                }
+              });
+            }
+          });
+
+          if (trendingSongs.length > 0) {
+            return res.json({
+              success: true,
+              language,
+              total: trendingSongs.length,
+              songs: trendingSongs
+            });
+          }
+        }
+      } catch (error) {
+        console.log(`Trending API ${apiUrl} failed:`, error.message);
+        continue;
+      }
+    }
+
+    // Fallback: return some local tracks if external APIs fail
+    const db = getDb();
+    const localTracks = db.prepare(
+      'SELECT id, title, artist, album, duration, file_path FROM tracks ORDER BY RANDOM() LIMIT ?'
+    ).all(limit);
+
+    res.json({
+      success: true,
+      language,
+      total: localTracks.length,
+      songs: localTracks.map(track => ({ ...track, source: 'local' })),
+      note: 'Using local tracks as external APIs are unavailable'
+    });
+
+  } catch (error) {
+    console.error('Popular songs error:', error);
+    res.status(500).json({ error: 'Failed to fetch popular songs', details: error.message });
+  }
+});
+
+// GET /api/tracks/recommendations - Get recommended songs based on user preferences
+router.get('/recommendations', async (req, res) => {
+  const { language = 'telugu', genre, artist, limit = 10 } = req.query;
+
+  try {
+    // For now, use search with some intelligent keywords
+    let searchQuery = language;
+
+    if (genre) searchQuery += ` ${genre}`;
+    if (artist) searchQuery += ` ${artist}`;
+
+    // Add some variety keywords
+    const varietyTerms = ['hits', 'popular', 'trending', 'latest', 'top'];
+    searchQuery += ` ${varietyTerms[Math.floor(Math.random() * varietyTerms.length)]}`;
+
+    // Reuse the search endpoint
+    const searchResponse = await fetch(`http://localhost:${process.env.PORT || 5000}/api/tracks/search?query=${encodeURIComponent(searchQuery)}&limit=${limit}&language=${language}`);
+    const searchData = await searchResponse.json();
+
+    if (searchData.success && searchData.songs.length > 0) {
+      return res.json({
+        success: true,
+        query: searchQuery,
+        recommendations: searchData.songs,
+        based_on: { language, genre, artist }
+      });
+    }
+
+    // Fallback to local tracks
+    const db = getDb();
+    const localTracks = db.prepare(
+      'SELECT id, title, artist, album, duration, file_path FROM tracks ORDER BY RANDOM() LIMIT ?'
+    ).all(limit);
+
+    res.json({
+      success: true,
+      recommendations: localTracks.map(track => ({ ...track, source: 'local' })),
+      note: 'Using local tracks as recommendations'
+    });
+
+  } catch (error) {
+    console.error('Recommendations error:', error);
+    res.status(500).json({ error: 'Failed to get recommendations', details: error.message });
+  }
+});
+
+module.exports = router;

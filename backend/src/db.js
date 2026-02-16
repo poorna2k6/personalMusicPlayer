@@ -50,9 +50,38 @@ function initDb() {
       FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS analytics_sessions (
+      id TEXT PRIMARY KEY,
+      user_agent TEXT,
+      ip_address TEXT,
+      language TEXT,
+      platform TEXT,
+      screen_size TEXT,
+      timezone TEXT,
+      referrer TEXT,
+      url TEXT,
+      start_time INTEGER,
+      end_time INTEGER,
+      duration INTEGER,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS analytics_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      event_data TEXT,
+      timestamp INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (session_id) REFERENCES analytics_sessions(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
     CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album);
     CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id);
+    CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id);
+    CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type);
+    CREATE INDEX IF NOT EXISTS idx_analytics_timestamp ON analytics_events(timestamp);
   `);
 
   return db;

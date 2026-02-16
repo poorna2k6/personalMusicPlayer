@@ -1,0 +1,20 @@
+{
+  "name": "Raagam - Telugu Music Player",
+  "short_name": "Raagam",
+  "description": "Your personal Telugu music player. Ad-free, subscription-free music streaming.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#8b5cf6",
+  "orientation": "portrait-primary",
+  "categories": ["music", "entertainment"],
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/music-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

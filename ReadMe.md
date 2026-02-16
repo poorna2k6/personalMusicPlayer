@@ -28,30 +28,40 @@ You can replace React/Node with your preferred stack (e.g., Java Spring Boot bac
 - Keep all music data on your own machine or home server.[3][4]
 - Make setup simple enough to deploy on a low‑cost VPS, NAS, or local PC.[4][3]
 
-## Getting Started
+## Railway Deployment
 
-### Prerequisites
-
-- Node.js and npm installed (for a JS stack).[8]
-- A folder on disk containing your music files, organized by artist/album if possible.[4]
-
-### Installation
-
-1. Clone the repository:  
-   ```bash
-   git clone https://github.com/your-username/personal-music-player.git
-   cd personal-music-player
+### Automatic Deployment from GitHub
+1. Connect your GitHub repository to Railway
+2. Set environment variables in Railway dashboard:
    ```
-2. Install dependencies:  
-   ```bash
-   npm install
+   MUSIC_LIBRARY_PATH=/app/music
+   DB_PATH=/app/data/music.db
+   PORT=4000
    ```
-3. Configure environment variables by copying `.env.example` to `.env` and adjusting paths and ports.[8]
-4. Start the development server:  
-   ```bash
-   npm run dev
-   ```  
-5. Open the app in your browser at `http://localhost:3000` (or the port you configured).[8]
+3. Push to main branch to trigger automatic deployment
+
+### Manual Deployment from VS Code
+```bash
+# Install Railway CLI
+npm run railway:login
+
+# Initialize project
+npm run railway:init
+
+# Deploy
+npm run railway:deploy
+
+# View logs
+npm run railway:logs
+
+# Open Railway dashboard
+npm run railway:open
+```
+
+### GitHub Actions Deployment
+The repository includes a GitHub Actions workflow for automatic Railway deployment. Set these secrets in your repository:
+- `RAILWAY_TOKEN`: Your Railway API token
+- `RAILWAY_PROJECT_ID`: Your Railway project ID
 
 ## Configuration
 

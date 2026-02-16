@@ -2,8 +2,30 @@
 
 // ===== Config =====
 const CONFIG = {
-  apiBase: localStorage.getItem('raagam_api') || 'https://saavn.dev/api',
+  apiBase: localStorage.getItem('raagam_api') || 'https://jiosaavn-api-privatecvc2.vercel.app',
   quality: parseInt(localStorage.getItem('raagam_quality') || '3'), // 0-4 index into downloadUrl array
+  apiMirrors: [
+    'https://jiosaavn-api-privatecvc2.vercel.app',
+    'https://saavn-api.vercel.app',
+    'https://jiosaavn-api-2.vercel.app',
+    'https://saavn.dev/api'
+  ],
+  preferredLanguage: localStorage.getItem('raagam_language') || null,
+  userProfile: JSON.parse(localStorage.getItem('raagam_profile') || 'null'),
+  supportedLanguages: {
+    'hindi': { name: 'Hindi', keywords: ['hindi', 'bollywood', 'filmi', 'indian pop'] },
+    'telugu': { name: 'Telugu', keywords: ['telugu', 'tollywood', 'telangana'] },
+    'tamil': { name: 'Tamil', keywords: ['tamil', 'kollywood', 'tamilnadu'] },
+    'kannada': { name: 'Kannada', keywords: ['kannada', 'sandalwood', 'karnataka'] },
+    'malayalam': { name: 'Malayalam', keywords: ['malayalam', 'mollywood', 'kerala'] },
+    'punjabi': { name: 'Punjabi', keywords: ['punjabi', 'bhangra', 'punjab'] },
+    'bengali': { name: 'Bengali', keywords: ['bengali', 'tollywood', 'bengal'] },
+    'marathi': { name: 'Marathi', keywords: ['marathi', 'marathi', 'maharashtra'] },
+    'gujarati': { name: 'Gujarati', keywords: ['gujarati', 'gujarat'] },
+    'bhojpuri': { name: 'Bhojpuri', keywords: ['bhojpuri', 'bihar', 'uttar pradesh'] },
+    'english': { name: 'English', keywords: ['english', 'western', 'pop', 'rock', 'jazz'] },
+    'all': { name: 'All Languages', keywords: [] }
+  }
 };
 
 // ===== State =====
@@ -19,28 +41,180 @@ const state = {
   currentView: 'home',
   searchCache: {},
   homeLoaded: false,
+  autoPlayMode: localStorage.getItem('raagam_autoPlay') !== 'false', // intelligent auto-play enabled by default
+  playedTracks: [], // tracks played in current session for recommendations
+  languageSetupComplete: localStorage.getItem('raagam_language_setup') === 'true',
+  userProfile: CONFIG.userProfile,
+  favoriteGenres: JSON.parse(localStorage.getItem('raagam_favorite_genres') || '[]'),
+  listeningHistory: JSON.parse(localStorage.getItem('raagam_listening_history') || '[]')
 };
 
-// ===== DOM =====
-const $ = (s) => document.querySelector(s);
-const $$ = (s) => document.querySelectorAll(s);
-const audio = $('#audio');
+// ===== Analytics & Tracking =====
+const analytics = {
+  sessionId: null,
+  startTime: null,
+  events: [],
+
+  init() {
+    this.sessionId = this.generateSessionId();
+    this.startTime = Date.now();
+
+    // Track basic session info
+    this.trackEvent('session_start', {
+      userAgent: navigator.userAgent,
+      language: navigator.language,
+      platform: navigator.platform,
+      screenSize: `${screen.width}x${screen.height}`,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      referrer: document.referrer,
+      url: window.location.href
+    });
+
+    // Track page visibility changes
+    document.addEventListener('visibilitychange', () => {
+      this.trackEvent('visibility_change', {
+        hidden: document.hidden,
+        timestamp: Date.now()
+      });
+    });
+
+    // Track before unload
+    window.addEventListener('beforeunload', () => {
+      this.trackEvent('session_end', {
+        duration: Date.now() - this.startTime,
+        totalEvents: this.events.length
+      });
+      this.sendAnalytics();
+    });
+  },
+
+  generateSessionId() {
+    return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  },
+
+  trackEvent(eventType, data = {}) {
+    const event = {
+      sessionId: this.sessionId,
+      timestamp: Date.now(),
+      eventType,
+      data: {
+        ...data,
+        currentView: state.currentView,
+        currentTrack: state.currentTrack ? {
+          id: state.currentTrack.id,
+          name: getTrackName(state.currentTrack),
+          language: detectLanguage(state.currentTrack)
+        } : null
+      }
+    };
+
+    this.events.push(event);
+
+    // Send events in batches of 10 or every 30 seconds
+    if (this.events.length >= 10) {
+      this.sendAnalytics();
+    }
+  },
+
+  trackMusicAction(action, trackData = {}) {
+    this.trackEvent('music_action', {
+      action, // play, pause, next, prev, like, unlike, search, etc.
+      track: trackData,
+      queueLength: state.queue.length,
+      queueIndex: state.queueIndex,
+      volume: audio ? audio.volume : null,
+      currentTime: audio ? audio.currentTime : null
+    });
+  },
+
+  trackSearch(query, resultsCount, languageFilter = null) {
+    this.trackEvent('search', {
+      query,
+      resultsCount,
+      languageFilter,
+      hasResults: resultsCount > 0
+    });
+  },
+
+  sendAnalytics() {
+    if (this.events.length === 0) return;
+
+    // Send to backend analytics endpoint
+    const backendUrl = 'http://localhost:8765/api/analytics'; // Update this to your backend URL
+
+    fetch(backendUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: this.sessionId,
+        events: this.events
+      })
+    }).then(response => {
+      if (response.ok) {
+        console.log(`Sent ${this.events.length} analytics events to backend`);
+      } else {
+        console.warn('Analytics send failed:', response.status);
+      }
+    }).catch(err => {
+      console.warn('Analytics send error:', err);
+      // Fallback: store locally if backend is unavailable
+      localStorage.setItem('pending_analytics', JSON.stringify(this.events));
+    });
+
+    // Clear sent events
+    this.events = [];
+  }
+};
 
 // ===== API =====
 async function apiSearch(query, limit = 20) {
   const cacheKey = `${query}_${limit}`;
   if (state.searchCache[cacheKey]) return state.searchCache[cacheKey];
 
-  try {
-    const res = await fetch(`${CONFIG.apiBase}/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`);
-    const json = await res.json();
-    const results = json.data?.results || [];
-    state.searchCache[cacheKey] = results;
-    return results;
-  } catch (e) {
-    console.error('API error:', e);
-    return [];
+  // Try current API first, then fallbacks
+  for (const apiUrl of CONFIG.apiMirrors) {
+    try {
+      console.log(`Trying API: ${apiUrl}`);
+
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      const res = await fetch(`${apiUrl}/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`, {
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        console.warn(`API ${apiUrl} returned ${res.status}, trying next...`);
+        continue;
+      }
+
+      const json = await res.json();
+      const results = json.data?.results || [];
+
+      if (results.length > 0) {
+        // If we used a different API than the current one, update the config
+        if (apiUrl !== CONFIG.apiBase) {
+          CONFIG.apiBase = apiUrl;
+          localStorage.setItem('raagam_api', apiUrl);
+          showToast(`Switched to working API: ${apiUrl.split('/')[2]}`);
+          $('#api-server').value = apiUrl;
+        }
+
+        state.searchCache[cacheKey] = results;
+        return results;
+      }
+    } catch (e) {
+      console.warn(`API ${apiUrl} failed:`, e.message);
+      continue;
+    }
   }
+
+  console.error('All APIs failed');
+  showToast('All music APIs are currently unavailable');
+  return [];
 }
 
 // ===== Helpers =====
@@ -92,12 +266,22 @@ function isLiked(trackId) {
 
 function toggleLike(track) {
   const idx = state.liked.findIndex(t => t.id === track.id);
-  if (idx >= 0) {
+  const wasLiked = idx >= 0;
+
+  if (wasLiked) {
     state.liked.splice(idx, 1);
     showToast('Removed from Liked Songs');
+    analytics.trackMusicAction('unlike', {
+      trackId: track.id,
+      trackName: getTrackName(track)
+    });
   } else {
     state.liked.unshift(track);
     showToast('Added to Liked Songs');
+    analytics.trackMusicAction('like', {
+      trackId: track.id,
+      trackName: getTrackName(track)
+    });
   }
   localStorage.setItem('raagam_liked', JSON.stringify(state.liked));
   updateLikeButtons();
@@ -125,6 +309,158 @@ function getGreeting() {
   if (h < 12) return 'Good Morning';
   if (h < 17) return 'Good Afternoon';
   return 'Good Evening';
+}
+
+// ===== Language & Genre Functions =====
+function detectLanguage(track) {
+  const text = `${getTrackName(track)} ${getAlbumName(track)} ${getArtistName(track)}`.toLowerCase();
+
+  for (const [langCode, langData] of Object.entries(CONFIG.supportedLanguages)) {
+    if (langCode === 'all') continue;
+
+    for (const keyword of langData.keywords) {
+      if (text.includes(keyword)) {
+        return langCode;
+      }
+    }
+  }
+
+  return 'all'; // Default to all languages if no specific language detected
+}
+
+function filterTracksByLanguage(tracks, preferredLanguage) {
+  if (!preferredLanguage || preferredLanguage === 'all') return tracks;
+
+  // First, get tracks that match the preferred language
+  const preferredTracks = tracks.filter(track => detectLanguage(track) === preferredLanguage);
+
+  // If we have enough preferred tracks, return them
+  if (preferredTracks.length >= 5) return preferredTracks;
+
+  // Otherwise, return preferred tracks first, then others
+  const otherTracks = tracks.filter(track => detectLanguage(track) !== preferredLanguage);
+  return [...preferredTracks, ...otherTracks];
+}
+
+function detectGenre(track) {
+  const text = `${getTrackName(track)} ${getAlbumName(track)}`.toLowerCase();
+
+  const genreKeywords = {
+    'pop': ['pop', 'dance', 'party', 'club', 'remix'],
+    'rock': ['rock', 'metal', 'alternative', 'indie', 'punk'],
+    'hip-hop': ['hip hop', 'rap', 'hip-hop', 'trap', 'r&b'],
+    'classical': ['classical', 'instrumental', 'orchestra', 'symphony'],
+    'folk': ['folk', 'traditional', 'regional', 'desi'],
+    'romantic': ['love', 'romantic', 'romance', 'heart', 'jaan'],
+    'devotional': ['bhajan', 'devotional', 'spiritual', 'temple', 'god'],
+    'patriotic': ['desh', 'bharat', 'india', 'national', 'patriotic']
+  };
+
+  for (const [genre, keywords] of Object.entries(genreKeywords)) {
+    for (const keyword of keywords) {
+      if (text.includes(keyword)) {
+        return genre;
+      }
+    }
+  }
+
+  return 'general';
+}
+
+// ===== Improved Recommendations =====
+function getRecommendedTracks(currentTrack, allTracks, playedTracks = [], maxRecommendations = 5) {
+  if (!currentTrack || !allTracks.length) return [];
+
+  const playedIds = new Set(playedTracks.map(t => t.id));
+  const availableTracks = allTracks.filter(t => t.id !== currentTrack.id && !playedIds.has(t.id));
+
+  if (availableTracks.length === 0) return [];
+
+  // Detect current track's language and genre
+  const currentLanguage = detectLanguage(currentTrack);
+  const currentGenre = detectGenre(currentTrack);
+
+  // Calculate similarity scores for each track
+  const scoredTracks = availableTracks.map(track => ({
+    ...track,
+    score: calculateSimilarityScore(currentTrack, track, currentLanguage, currentGenre)
+  }));
+
+  // Sort by score (highest first) and return top recommendations
+  return scoredTracks
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxRecommendations);
+}
+
+function calculateSimilarityScore(track1, track2, currentLanguage, currentGenre) {
+  let score = 0;
+
+  // Language match: highest priority for preferred language
+  const track2Language = detectLanguage(track2);
+  if (track2Language === currentLanguage && currentLanguage !== 'all') {
+    score += 100; // Very high weight for same language
+  } else if (track2Language === CONFIG.preferredLanguage) {
+    score += 80; // High weight for preferred language
+  }
+
+  // Genre match: high weight
+  const track2Genre = detectGenre(track2);
+  if (track2Genre === currentGenre && currentGenre !== 'general') {
+    score += 60;
+  }
+
+  // Same artist: medium-high weight
+  if (getArtistName(track1) === getArtistName(track2)) {
+    score += 40;
+  }
+
+  // Same album: medium weight (but lower than language/genre)
+  if (getAlbumName(track1) === getAlbumName(track2)) {
+    score += 20;
+  }
+
+  // Theme/keyword matching (reduced weight)
+  const themeKeywords = [
+    'love', 'romantic', 'heart', 'jaan', 'pyar', 'sad', 'happy', 'emotional',
+    'party', 'dance', 'remix', 'slow', 'fast', 'classical', 'folk'
+  ];
+
+  const title1Words = getTrackName(track1).toLowerCase().split(/\s+/);
+  const title2Words = getTrackName(track2).toLowerCase().split(/\s+/);
+
+  const commonThemeWords = title1Words.filter(word =>
+    title2Words.includes(word) && themeKeywords.includes(word)
+  );
+
+  score += commonThemeWords.length * 10;
+
+  // Duration similarity: small boost
+  const duration1 = track1.duration || 0;
+  const duration2 = track2.duration || 0;
+  if (Math.abs(duration1 - duration2) <= 120) {
+    score += 5;
+  }
+
+  return score;
+}
+
+function detectMood(track) {
+  const text = `${getTrackName(track)} ${getAlbumName(track)}`.toLowerCase();
+
+  if (text.includes('prema') || text.includes('love') || text.includes('romantic')) {
+    return 'romantic';
+  }
+  if (text.includes('folk') || text.includes('traditional') || text.includes('dance')) {
+    return 'folk';
+  }
+  if (text.includes('classical') || text.includes('raaga') || text.includes('carnatic')) {
+    return 'classical';
+  }
+  if (text.includes('devotional') || text.includes('bhakti')) {
+    return 'devotional';
+  }
+
+  return 'general';
 }
 
 // ===== Rendering =====
@@ -185,7 +521,7 @@ function renderLoader() {
 async function loadHome() {
   if (state.homeLoaded) return;
 
-  $('.header-title').textContent = getGreeting();
+  updateGreeting();
 
   // Quick picks from recent
   const quickPicks = $('#quick-picks');
@@ -202,6 +538,16 @@ async function loadHome() {
     });
   } else {
     quickPicks.innerHTML = '';
+  }
+
+  // Recently played section
+  const recentRow = $('#recent-row');
+  if (state.recent.length > 0) {
+    recentRow.innerHTML = '';
+    const recentTracks = state.recent.slice(0, 10); // Show last 10 played
+    recentTracks.forEach(t => recentRow.appendChild(renderSongCard(t)));
+  } else {
+    recentRow.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">Play some songs to see them here</p>';
   }
 
   // Load sections
@@ -226,6 +572,7 @@ async function loadHome() {
   });
 
   state.homeLoaded = true;
+  console.log('Home loaded successfully');
 }
 
 // ===== Search =====
@@ -257,6 +604,14 @@ function setupSearch() {
     categories.classList.remove('hidden');
     resultsContainer.querySelectorAll('.result-section-title, .result-item, .loader, .empty-state').forEach(e => e.remove());
     input.focus();
+  });
+
+  // Language filter
+  $('#search-language-filter').addEventListener('change', () => {
+    const q = input.value.trim();
+    if (q) {
+      performSearch(q);
+    }
   });
 
   // Categories
@@ -291,6 +646,8 @@ function setupSearch() {
 
 async function performSearch(query) {
   const resultsContainer = $('#search-results');
+  const languageFilter = $('#search-language-filter').value;
+
   // Clear old results
   resultsContainer.querySelectorAll('.result-section-title, .result-item, .loader, .empty-state').forEach(e => e.remove());
 
@@ -299,17 +656,32 @@ async function performSearch(query) {
   loader.innerHTML = renderLoader();
   resultsContainer.appendChild(loader.firstElementChild);
 
-  const tracks = await apiSearch(query, 25);
+  // If language filter is set, include it in search query
+  let searchQuery = query;
+  if (languageFilter) {
+    const langData = CONFIG.supportedLanguages[languageFilter];
+    if (langData) {
+      searchQuery = `${query} ${langData.keywords[0]}`;
+    }
+  }
+
+  const tracks = await apiSearch(searchQuery, 25);
 
   // Remove loader
   resultsContainer.querySelectorAll('.loader').forEach(e => e.remove());
 
-  if (tracks.length === 0) {
+  // Filter results by selected language if specified
+  let filteredTracks = tracks;
+  if (languageFilter) {
+    filteredTracks = tracks.filter(track => detectLanguage(track) === languageFilter);
+  }
+
+  if (filteredTracks.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.innerHTML = `
       <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-      <p>No results found for "${query}"</p>
+      <p>No ${languageFilter ? CONFIG.supportedLanguages[languageFilter].name + ' ' : ''}results found for "${query}"</p>
     `;
     resultsContainer.appendChild(empty);
     return;
@@ -317,10 +689,13 @@ async function performSearch(query) {
 
   const title = document.createElement('p');
   title.className = 'result-section-title';
-  title.textContent = 'Songs';
+  title.textContent = languageFilter ? `${CONFIG.supportedLanguages[languageFilter].name} Songs` : 'Songs';
   resultsContainer.appendChild(title);
 
-  tracks.forEach(t => resultsContainer.appendChild(renderResultItem(t)));
+  filteredTracks.forEach(t => resultsContainer.appendChild(renderResultItem(t)));
+
+  // Track search analytics
+  analytics.trackSearch(query, filteredTracks.length, languageFilter);
 }
 
 // ===== Player =====
@@ -328,10 +703,16 @@ function playSong(track, addToQueue = true) {
   const url = getAudioUrl(track);
   if (!url) {
     showToast('No audio available for this track');
+    analytics.trackMusicAction('play_failed', { track: track.id });
     return;
   }
 
   state.currentTrack = track;
+
+  // Track played tracks for recommendations (keep last 20)
+  state.playedTracks = state.playedTracks.filter(t => t.id !== track.id);
+  state.playedTracks.unshift(track);
+  if (state.playedTracks.length > 20) state.playedTracks = state.playedTracks.slice(0, 20);
 
   if (addToQueue) {
     // Add to queue after current position
@@ -348,9 +729,18 @@ function playSong(track, addToQueue = true) {
   audio.play().then(() => {
     state.isPlaying = true;
     updatePlayerUI();
+    analytics.trackMusicAction('play', {
+      trackId: track.id,
+      trackName: getTrackName(track),
+      artist: getArtistName(track),
+      language: detectLanguage(track),
+      genre: detectGenre(track),
+      source: 'user_click' // or 'auto_play', 'queue_next', etc.
+    });
   }).catch(e => {
     console.error('Playback error:', e);
     showToast('Could not play this track');
+    analytics.trackMusicAction('play_error', { track: track.id, error: e.message });
   });
 
   addToRecent(track);
@@ -364,15 +754,24 @@ function togglePlay() {
   if (audio.paused) {
     audio.play();
     state.isPlaying = true;
+    analytics.trackMusicAction('resume');
   } else {
     audio.pause();
     state.isPlaying = false;
+    analytics.trackMusicAction('pause');
   }
   updatePlayerUI();
 }
 
 function playNext() {
-  if (state.queue.length === 0) return;
+  if (state.queue.length === 0) {
+    // If queue is empty and auto-play is enabled, get recommendations
+    if (state.autoPlayMode && state.currentTrack) {
+      getAutoPlayRecommendations();
+      return;
+    }
+    return;
+  }
 
   if (state.repeat === 'one') {
     audio.currentTime = 0;
@@ -387,17 +786,28 @@ function playNext() {
     nextIdx = state.queueIndex + 1;
     if (nextIdx >= state.queue.length) {
       if (state.repeat === 'all') nextIdx = 0;
-      else { state.isPlaying = false; updatePlayerUI(); return; }
+      else {
+        // Queue finished, try auto-play if enabled
+        if (state.autoPlayMode && state.currentTrack) {
+          getAutoPlayRecommendations();
+          return;
+        }
+        state.isPlaying = false;
+        updatePlayerUI();
+        return;
+      }
     }
   }
 
   state.queueIndex = nextIdx;
   playSong(state.queue[nextIdx], false);
+  analytics.trackMusicAction('next', { shuffle: state.shuffle, repeat: state.repeat });
 }
 
 function playPrev() {
   if (audio.currentTime > 3) {
     audio.currentTime = 0;
+    analytics.trackMusicAction('rewind');
     return;
   }
   if (state.queue.length === 0) return;
@@ -407,12 +817,93 @@ function playPrev() {
 
   state.queueIndex = prevIdx;
   playSong(state.queue[prevIdx], false);
+  analytics.trackMusicAction('previous');
 }
 
 function playFromQueue(index) {
   if (index >= 0 && index < state.queue.length) {
     state.queueIndex = index;
     playSong(state.queue[index], false);
+  }
+}
+
+async function getAutoPlayRecommendations() {
+  if (!state.currentTrack) return;
+
+  showToast('Finding similar songs...');
+
+  try {
+    // Detect current track's language and genre for better recommendations
+    const currentLanguage = detectLanguage(state.currentTrack);
+    const currentGenre = detectGenre(state.currentTrack);
+
+    // Create search queries based on language and genre (Spotify-like approach)
+    let searchQueries = [];
+
+    // Primary: Search for songs in the same language and genre
+    if (currentLanguage !== 'all') {
+      const langData = CONFIG.supportedLanguages[currentLanguage];
+      if (langData) {
+        searchQueries.push(`${langData.keywords[0]} ${currentGenre}`);
+        searchQueries.push(`${langData.keywords[0]} songs`);
+      }
+    }
+
+    // Secondary: Search for genre-specific songs
+    if (currentGenre !== 'general') {
+      searchQueries.push(`${currentGenre} songs`);
+      searchQueries.push(`${currentGenre} music`);
+    }
+
+    // Tertiary: Search for artist if no good matches found
+    if (searchQueries.length === 0) {
+      searchQueries.push(getArtistName(state.currentTrack));
+    }
+
+    // Try each search query until we find good recommendations
+    let allResults = [];
+    for (const query of searchQueries) {
+      const results = await apiSearch(query, 15);
+      allResults = allResults.concat(results);
+
+      // If we have enough results, break
+      if (allResults.length >= 20) break;
+    }
+
+    // Remove duplicates
+    const uniqueResults = allResults.filter((track, index, self) =>
+      index === self.findIndex(t => t.id === track.id)
+    );
+
+    if (uniqueResults.length === 0) {
+      showToast('No recommendations found');
+      state.isPlaying = false;
+      updatePlayerUI();
+      return;
+    }
+
+    // Filter by preferred language and get recommendations
+    const filteredResults = filterTracksByLanguage(uniqueResults, CONFIG.preferredLanguage);
+    const recommendations = getRecommendedTracks(state.currentTrack, filteredResults, state.playedTracks, 3);
+
+    if (recommendations.length === 0) {
+      // Fallback to random from filtered results
+      const randomTrack = filteredResults[Math.floor(Math.random() * Math.min(filteredResults.length, 5))];
+      playSong(randomTrack);
+      return;
+    }
+
+    // Add recommendations to queue and play first one
+    state.queue = recommendations;
+    state.queueIndex = 0;
+    playSong(recommendations[0], false);
+
+    showToast(`Playing ${recommendations.length} recommended ${currentGenre} songs`);
+  } catch (e) {
+    console.error('Auto-play error:', e);
+    showToast('Could not get recommendations');
+    state.isPlaying = false;
+    updatePlayerUI();
   }
 }
 
@@ -448,6 +939,9 @@ function updatePlayerUI() {
       repeatBtn.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>';
     }
   }
+
+  // Auto-play
+  $('#np-autoplay')?.classList.toggle('active', state.autoPlayMode);
 }
 
 function updateMiniPlayer() {
@@ -621,6 +1115,11 @@ function setupLibrary() {
 
 // ===== Navigation =====
 function switchView(view) {
+  analytics.trackEvent('view_change', {
+    fromView: state.currentView,
+    toView: view
+  });
+
   state.currentView = view;
   $$('.view').forEach(v => v.classList.remove('active'));
   $(`#view-${view}`).classList.add('active');
@@ -628,7 +1127,7 @@ function switchView(view) {
 
   // Update header
   if (view === 'home') {
-    $('.header-title').textContent = getGreeting();
+    updateGreeting();
     $('#header').style.display = '';
   } else if (view === 'search') {
     $('#header').style.display = 'none';
@@ -646,6 +1145,7 @@ function openSettings() {
   $('#settings-panel').classList.remove('hidden');
   $('#audio-quality').value = CONFIG.quality;
   $('#api-server').value = CONFIG.apiBase;
+  $('#preferred-language').value = CONFIG.preferredLanguage || 'all';
 }
 
 function closeSettings() {
@@ -689,6 +1189,12 @@ function setupEvents() {
     updatePlayerUI();
     const labels = { off: 'Repeat Off', all: 'Repeat All', one: 'Repeat One' };
     showToast(labels[state.repeat]);
+  });
+  $('#np-autoplay').addEventListener('click', () => {
+    state.autoPlayMode = !state.autoPlayMode;
+    localStorage.setItem('raagam_autoPlay', state.autoPlayMode);
+    updatePlayerUI();
+    showToast(state.autoPlayMode ? 'Auto-play On' : 'Auto-play Off');
   });
 
   // Seek
@@ -737,6 +1243,11 @@ function setupEvents() {
     showToast('API server changed. Reloading...');
     setTimeout(() => loadHome(), 500);
   });
+  $('#preferred-language').addEventListener('change', (e) => {
+    CONFIG.preferredLanguage = e.target.value;
+    localStorage.setItem('raagam_language', CONFIG.preferredLanguage);
+    showToast(`Preferred language: ${CONFIG.supportedLanguages[e.target.value].name}`);
+  });
 
   // Media Session API
   if ('mediaSession' in navigator) {
@@ -781,14 +1292,125 @@ function setupEvents() {
   });
 }
 
-// ===== Init =====
+// ===== Language Setup =====
+function showLanguageDialog() {
+  const dialog = $('#language-dialog');
+  dialog.classList.remove('hidden');
+
+  // Add event listeners to language options
+  const languageOptions = $$('.language-option');
+  languageOptions.forEach(option => {
+    option.addEventListener('click', () => {
+      const selectedLang = option.dataset.lang;
+      CONFIG.preferredLanguage = selectedLang;
+      localStorage.setItem('raagam_language', selectedLang);
+      localStorage.setItem('raagam_language_setup', 'true');
+      state.languageSetupComplete = true;
+
+      dialog.classList.add('hidden');
+
+      // Now initialize the app
+      setTimeout(() => {
+        $('#app').classList.remove('hidden');
+        $('#splash').addEventListener('animationend', () => $('#splash').remove());
+      }, 100);
+
+      setupEvents();
+      setupSearch();
+      setupLibrary();
+      loadHome();
+
+      showToast(`Language set to ${CONFIG.supportedLanguages[selectedLang].name}`);
+    });
+  });
+}
+
+function showProfileDialog() {
+  const dialog = $('#profile-dialog');
+  dialog.classList.remove('hidden');
+
+  const form = $('#profile-form');
+  const skipBtn = $('#skip-profile');
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = $('#user-name').value.trim();
+    const phone = $('#user-phone').value.trim();
+
+    if (name) {
+      CONFIG.userProfile = { name, phone };
+      localStorage.setItem('raagam_profile', JSON.stringify(CONFIG.userProfile));
+      state.userProfile = CONFIG.userProfile;
+      analytics.trackEvent('profile_created', { hasPhone: !!phone });
+    }
+
+    dialog.classList.add('hidden');
+    init(); // Continue to next step
+  });
+
+  skipBtn.addEventListener('click', () => {
+    dialog.classList.add('hidden');
+    analytics.trackEvent('profile_skipped');
+    init(); // Continue without profile
+  });
+}
+
+function updateLanguageSetting() {
+  const langSelect = $('#preferred-language');
+  if (langSelect) {
+    langSelect.value = CONFIG.preferredLanguage || 'all';
+  }
+}
+
+function updateGreeting() {
+  const headerTitle = $('.header-title');
+  const now = new Date();
+  const hour = now.getHours();
+  let greeting = 'Good evening';
+
+  if (hour < 12) greeting = 'Good morning';
+  else if (hour < 17) greeting = 'Good afternoon';
+
+  if (CONFIG.userProfile && CONFIG.userProfile.name) {
+    headerTitle.textContent = `${greeting}, ${CONFIG.userProfile.name}!`;
+  } else {
+    headerTitle.textContent = greeting;
+  }
+}
+
 function init() {
+  console.log('init() called');
+  console.log('userProfile:', state.userProfile);
+  console.log('languageSetupComplete:', state.languageSetupComplete);
+
+  // Check if profile is set up
+  if (!state.userProfile) {
+    console.log('Profile not set up, showing profile dialog');
+    showProfileDialog();
+    return;
+  }
+
+  // Check if language setup is needed
+  if (!state.languageSetupComplete) {
+    console.log('Language setup not complete, auto-setting to English');
+    // For testing: auto-select English and skip dialog
+    CONFIG.preferredLanguage = 'english';
+    localStorage.setItem('raagam_language', 'english');
+    localStorage.setItem('raagam_language_setup', 'true');
+    state.languageSetupComplete = true;
+    console.log('Language setup completed automatically for testing');
+  }
+
+  console.log('Showing app after splash');
   // Show app after splash
   setTimeout(() => {
+    console.log('Removing hidden class from app');
     $('#app').classList.remove('hidden');
     $('#splash').addEventListener('animationend', () => $('#splash').remove());
+    updateGreeting();
   }, 100);
 
+  console.log('Setting up events, search, library, and loading home');
   setupEvents();
   setupSearch();
   setupLibrary();
@@ -796,4 +1418,8 @@ function init() {
 }
 
 // Start the app
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOMContentLoaded fired');
+  analytics.init(); // Initialize analytics
+  init();
+});

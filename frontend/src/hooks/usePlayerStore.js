@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { getSequentialRecommendations } from '../utils/recommendations';
 
 const STORAGE_KEY = 'music-player-state';
 
@@ -18,6 +19,7 @@ function saveState(state) {
       volume: state.volume,
       shuffle: state.shuffle,
       repeat: state.repeat,
+      smartAutoPlay: state.smartAutoPlay,
     }));
   } catch {}
 }
@@ -33,13 +35,16 @@ export function usePlayerStore() {
   const [duration, setDuration] = useState(0);
   const [shuffle, setShuffle] = useState(saved.current?.shuffle || false);
   const [repeat, setRepeat] = useState(saved.current?.repeat || 'none'); // 'none' | 'all' | 'one'
+  const [smartAutoPlay, setSmartAutoPlay] = useState(saved.current?.smartAutoPlay || false);
+  const [allTracks, setAllTracks] = useState([]); // Store all available tracks for recommendations
+  const [playedTracks, setPlayedTracks] = useState([]); // Track played songs for better recommendations
 
   const currentTrack = queue[currentIndex] || null;
 
   // Persist state
   useEffect(() => {
-    saveState({ queue, currentIndex, volume, shuffle, repeat });
-  }, [queue, currentIndex, volume, shuffle, repeat]);
+    saveState({ queue, currentIndex, volume, shuffle, repeat, smartAutoPlay });
+  }, [queue, currentIndex, volume, shuffle, repeat, smartAutoPlay]);
 
   const playTrack = useCallback((track, trackList) => {
     if (trackList) {
@@ -63,6 +68,15 @@ export function usePlayerStore() {
 
   const nextTrack = useCallback(() => {
     if (queue.length === 0) return;
+
+    // Add current track to played tracks for recommendations
+    if (currentTrack) {
+      setPlayedTracks(prev => {
+        const newPlayed = [currentTrack, ...prev.filter(t => t.id !== currentTrack.id)];
+        return newPlayed.slice(0, 50); // Keep last 50 played tracks
+      });
+    }
+
     if (shuffle) {
       let next;
       do {
@@ -74,9 +88,26 @@ export function usePlayerStore() {
     } else if (repeat === 'all') {
       setCurrentIndex(0);
     } else {
+      // End of queue - check if smart auto-play is enabled
+      if (smartAutoPlay && currentTrack && allTracks.length > 0) {
+        const recommendations = getSequentialRecommendations(currentTrack, allTracks, playedTracks);
+        if (recommendations.length > 0) {
+          setQueue(prev => [...prev, ...recommendations]);
+          setCurrentIndex(prev => prev + 1);
+          return;
+        }
+      }
       setIsPlaying(false);
     }
-  }, [queue, currentIndex, shuffle, repeat]);
+
+    // Auto-queue more tracks if smart mode is on and queue is running low
+    if (smartAutoPlay && currentTrack && allTracks.length > 0 && queue.length - currentIndex <= 2) {
+      const recommendations = getSequentialRecommendations(currentTrack, allTracks, playedTracks);
+      if (recommendations.length > 0) {
+        setQueue(prev => [...prev, ...recommendations]);
+      }
+    }
+  }, [queue, currentIndex, shuffle, repeat, smartAutoPlay, currentTrack, allTracks, playedTracks]);
 
   const prevTrack = useCallback(() => {
     if (queue.length === 0) return;
@@ -103,11 +134,29 @@ export function usePlayerStore() {
     setQueue(prev => [...prev, track]);
   }, []);
 
+  const toggleSmartAutoPlay = useCallback(() => {
+    setSmartAutoPlay(prev => !prev);
+  }, []);
+
+  const updateAllTracks = useCallback((tracks) => {
+    setAllTracks(tracks);
+  }, []);
+
+  const addRecommendedTracks = useCallback((count = 5) => {
+    if (!currentTrack || allTracks.length === 0) return;
+
+    const recommendations = getSequentialRecommendations(currentTrack, allTracks, playedTracks, count);
+    if (recommendations.length > 0) {
+      setQueue(prev => [...prev, ...recommendations]);
+    }
+  }, [currentTrack, allTracks, playedTracks]);
+
   return {
     queue, currentTrack, currentIndex, isPlaying, volume, currentTime, duration,
-    shuffle, repeat,
+    shuffle, repeat, smartAutoPlay,
     setVolume, setCurrentTime, setDuration, setIsPlaying,
     playTrack, playAll, togglePlay, nextTrack, prevTrack,
     toggleShuffle, toggleRepeat, addToQueue,
+    toggleSmartAutoPlay, updateAllTracks, addRecommendedTracks,
   };
 }
