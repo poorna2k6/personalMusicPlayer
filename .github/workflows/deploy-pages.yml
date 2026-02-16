@@ -23,6 +23,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm run install:all
+
+      - name: Build frontend
+        run: cd frontend && npm run build
+        env:
+          VITE_DEMO_MODE: true
+
+      - name: Copy demo music files
+        run: mkdir -p docs/audio && cp -r music/* docs/audio/
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

@@ -1,0 +1,20 @@
+{
+  "name": "Raagam - Music Player",
+  "short_name": "Raagam",
+  "description": "Stream unlimited music. Ad-free, subscription-free. Hindi, Telugu, Tamil, English & more.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#8b5cf6",
+  "orientation": "portrait-primary",
+  "categories": ["music", "entertainment"],
+  "lang": "en",
+  "icons": [
+    {
+      "src": "./music-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

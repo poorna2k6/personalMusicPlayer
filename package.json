@@ -9,7 +9,15 @@
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
     "build": "cd frontend && npm run build",
-    "start": "cd backend && npm start"
+    "start": "cd backend && npm start",
+    "demo:build": "VITE_DEMO_MODE=true npm run build && mkdir -p docs/audio && cp -r music/* docs/audio/",
+    "demo:serve": "python3 -m http.server 8000 --directory docs",
+    "deploy:pages": "git add . && git commit -m 'Deploy to GitHub Pages' && git push",
+    "railway:login": "railway login",
+    "railway:init": "railway init",
+    "railway:deploy": "railway up",
+    "railway:logs": "railway logs",
+    "railway:open": "railway open"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
