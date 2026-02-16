@@ -88,4 +88,90 @@ router.get('/:id/cover', (req, res) => {
   }
 });
 
+
+// GET /api/tracks/popular - Get popular/trending songs with language fallback
+router.get('/popular', async (req, res) => {
+  const { limit = 20 } = req.query;
+  // Fallback order: user language → bollywood → hindi → generic
+  const userLang = req.query.language || '';
+  const languageFallbacks = [
+    userLang,
+    'bollywood',
+    'hindi',
+    '' // generic (no language param)
+  ].filter((v, i, arr) => v && arr.indexOf(v) === i); // remove empty/duplicates
+
+  const API_MIRRORS = [
+    'https://jiosaavn-api-privatecvc2.vercel.app',
+    'https://saavn.dev',
+    'https://saavn.me',
+    'https://saavn-api.vercel.app',
+    'https://saavn-api.codersensui.com',
+    'https://saavn-api-amber.vercel.app'
+  ];
+
+  for (const language of languageFallbacks) {
+    for (const apiUrl of API_MIRRORS) {
+      try {
+        let trendingUrl = `${apiUrl}/modules?includeMetaTags=1`;
+        if (language) trendingUrl += `&language=${encodeURIComponent(language)}`;
+        const response = await fetch(trendingUrl, {
+          timeout: 5000,
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Raagam/1.0)' }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const trendingSongs = [];
+          const modules = data.data || {};
+          ['trending', 'charts', 'new_releases', 'top_artists'].forEach(moduleKey => {
+            if (modules[moduleKey] && Array.isArray(modules[moduleKey])) {
+              modules[moduleKey].slice(0, 5).forEach(item => {
+                if (item.type === 'song' && trendingSongs.length < limit) {
+                  trendingSongs.push({
+                    id: item.id,
+                    title: item.name || item.title,
+                    artist: item.primaryArtists || item.artist,
+                    album: item.album?.name || 'Unknown Album',
+                    duration: item.duration || 0,
+                    language: item.language || language,
+                    image: item.image,
+                    downloadUrl: item.downloadUrl,
+                    url: item.url,
+                    source: 'external',
+                    category: moduleKey
+                  });
+                }
+              });
+            }
+          });
+          if (trendingSongs.length > 0) {
+            return res.json({
+              success: true,
+              language,
+              total: trendingSongs.length,
+              songs: trendingSongs,
+              note: language !== userLang ? `Fallback to ${language || 'generic'}` : undefined
+            });
+          }
+        }
+      } catch (error) {
+        // Try next mirror
+        continue;
+      }
+    }
+  }
+  // Fallback: return some local tracks if all external APIs fail
+  const db = getDb();
+  const localTracks = db.prepare(
+    'SELECT id, title, artist, album, duration, file_path FROM tracks ORDER BY RANDOM() LIMIT ?'
+  ).all(limit);
+  res.json({
+    success: true,
+    language: userLang,
+    total: localTracks.length,
+    songs: localTracks.map(track => ({ ...track, source: 'local' })),
+    note: 'Using local tracks as all trending sources failed'
+  });
+});
+
 module.exports = router;
