@@ -330,6 +330,9 @@
   </div>
 
   <script>
+    const ANALYTICS_API = window.location.hostname.includes('github.io')
+      ? 'https://raagam-analytics.vercel.app'
+      : `http://${window.location.hostname}:4500`;
     let charts = {};
     let autoRefreshInterval;
     let currentData = {};
@@ -374,11 +377,11 @@
           musicData,
           searchData
         ] = await Promise.all([
-          fetch('/api/analytics/dashboard').then(r => r.json()),
-          fetch(`/api/analytics/sessions/daily?days=${timeRange}`).then(r => r.json()),
-          fetch('/api/analytics/users/demographics').then(r => r.json()),
-          fetch(`/api/analytics/music/popularity?period=${timeRange === '7' ? 'week' : timeRange === '30' ? 'month' : 'day'}`).then(r => r.json()),
-          fetch('/api/analytics/search/analytics').then(r => r.json())
+          fetch(`${ANALYTICS_API}/api/analytics/dashboard`).then(r => r.json()),
+          fetch(`${ANALYTICS_API}/api/analytics/sessions/daily?days=${timeRange}`).then(r => r.json()),
+          fetch(`${ANALYTICS_API}/api/analytics/users/demographics`).then(r => r.json()),
+          fetch(`${ANALYTICS_API}/api/analytics/music/popularity?period=${timeRange === '7' ? 'week' : timeRange === '30' ? 'month' : 'day'}`).then(r => r.json()),
+          fetch(`${ANALYTICS_API}/api/analytics/search/analytics`).then(r => r.json())
         ]);
 
         currentData = {
@@ -654,7 +657,7 @@
 
     function exportData(format) {
       const link = document.createElement('a');
-      link.href = `/api/analytics/export?format=${format}`;
+      link.href = `${ANALYTICS_API}/api/analytics/export?format=${format}`;
       link.download = `analytics_export.${format}`;
       document.body.appendChild(link);
       link.click();

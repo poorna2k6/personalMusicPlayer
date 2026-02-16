@@ -1,23 +1,728 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f172a" />
-    <title>🎵 Raagam - Telugu Music Player</title>
-    <meta name="description" content="Raagam - Your personal Telugu music player. Ad-free, subscription-free music streaming with Spotify-inspired UI." />
-    <meta name="keywords" content="Raagam, Telugu music, music player, ad-free music, personal music, Spotify alternative" />
-    <meta name="author" content="Raagam Team" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Raagam" />
-    <link rel="icon" type="image/svg+xml" href="/music-icon.svg" />
-    <link rel="apple-touch-icon" href="/music-icon.svg" />
-    <link rel="manifest" href="/manifest.json" />
-    <script type="module" crossorigin src="/assets/index-_yJ5kJT-.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BMw5MPbi.css">
-  </head>
-  <body class="bg-surface-950 text-white">
-    <div id="root"></div>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#121212" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Raagam" />
+  <title>Raagam - Music Player</title>
+  <meta name="description" content="Raagam - Stream unlimited music. Search and play any song instantly." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%237c3aed'/><stop offset='100%25' stop-color='%2306b6d4'/></linearGradient></defs><rect width='512' height='512' rx='96' fill='url(%23g)'/><g transform='translate(256,256)' fill='white'><rect x='-105' y='-40' width='22' height='80' rx='11' opacity='.85'/><rect x='-65' y='-70' width='22' height='140' rx='11' opacity='.9'/><rect x='-25' y='-95' width='22' height='190' rx='11'/><rect x='15' y='-65' width='22' height='130' rx='11' opacity='.9'/><rect x='55' y='-85' width='22' height='170' rx='11' opacity='.95'/><rect x='95' y='-50' width='22' height='100' rx='11' opacity='.85'/></g></svg>" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://saavn.dev" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Splash Screen -->
+  <div id="splash" class="splash">
+    <div class="splash-content">
+      <div class="splash-icon">
+        <svg viewBox="0 0 120 120" fill="none">
+          <defs>
+            <linearGradient id="splash-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#7c3aed"/>
+              <stop offset="50%" stop-color="#a855f7"/>
+              <stop offset="100%" stop-color="#06b6d4"/>
+            </linearGradient>
+          </defs>
+          <rect x="4" y="4" width="112" height="112" rx="26" fill="url(#splash-grad)"/>
+          <g transform="translate(60,60)" fill="white">
+            <rect x="-28" y="-10" width="6" height="20" rx="3" opacity=".8">
+              <animate attributeName="height" values="20;40;20" dur="1s" repeatCount="indefinite"/>
+              <animate attributeName="y" values="-10;-20;-10" dur="1s" repeatCount="indefinite"/>
+            </rect>
+            <rect x="-16" y="-18" width="6" height="36" rx="3" opacity=".85">
+              <animate attributeName="height" values="36;16;36" dur="1.2s" repeatCount="indefinite"/>
+              <animate attributeName="y" values="-18;-8;-18" dur="1.2s" repeatCount="indefinite"/>
+            </rect>
+            <rect x="-4" y="-24" width="6" height="48" rx="3">
+              <animate attributeName="height" values="48;24;48" dur="0.8s" repeatCount="indefinite"/>
+              <animate attributeName="y" values="-24;-12;-24" dur="0.8s" repeatCount="indefinite"/>
+            </rect>
+            <rect x="8" y="-16" width="6" height="32" rx="3" opacity=".85">
+              <animate attributeName="height" values="32;44;32" dur="1.1s" repeatCount="indefinite"/>
+              <animate attributeName="y" values="-16;-22;-16" dur="1.1s" repeatCount="indefinite"/>
+            </rect>
+            <rect x="20" y="-20" width="6" height="40" rx="3" opacity=".9">
+              <animate attributeName="height" values="40;18;40" dur="0.9s" repeatCount="indefinite"/>
+              <animate attributeName="y" values="-20;-9;-20" dur="0.9s" repeatCount="indefinite"/>
+            </rect>
+          </g>
+        </svg>
+      </div>
+      <h1 class="splash-title">Raagam</h1>
+      <p class="splash-sub">Your Music, Your Vibe</p>
+    </div>
+  </div>
+
+  <!-- App Shell -->
+  <div id="app" class="app hidden">
+    <!-- Header -->
+    <header id="header" class="header">
+      <h1 class="header-title">Good Evening</h1>
+      <div class="header-actions">
+        <button id="btn-notification" class="icon-btn" aria-label="Settings">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Views -->
+    <main id="main-content" class="main-content">
+      <!-- Home View -->
+      <div id="view-home" class="view active">
+        <div class="quick-picks" id="quick-picks"></div>
+        <section class="section" id="section-trending">
+          <h2 class="section-title">Trending Now</h2>
+          <div class="scroll-row" id="trending-row"></div>
+        </section>
+        <section class="section" id="section-telugu">
+          <h2 class="section-title">Telugu Hits</h2>
+          <div class="scroll-row" id="telugu-row"></div>
+        </section>
+        <section class="section" id="section-bollywood">
+          <h2 class="section-title">Bollywood Vibes</h2>
+          <div class="scroll-row" id="bollywood-row"></div>
+        </section>
+        <section class="section" id="section-chill">
+          <h2 class="section-title">Chill & Relax</h2>
+          <div class="scroll-row" id="chill-row"></div>
+        </section>
+        <!-- Mood-Based Browse -->
+        <section class="section" id="section-moods">
+          <h2 class="section-title">Browse by Mood</h2>
+          <div class="mood-grid">
+            <div class="mood-card" style="background:linear-gradient(135deg,#FFD700,#FF8C00)"><span>😊</span><p>Happy</p></div>
+            <div class="mood-card" style="background:linear-gradient(135deg,#5B8DEF,#3A5BA0)"><span>😢</span><p>Sad</p></div>
+            <div class="mood-card" style="background:linear-gradient(135deg,#E8115B,#B30E48)"><span>💕</span><p>Romantic</p></div>
+            <div class="mood-card" style="background:linear-gradient(135deg,#FF6B35,#CC4400)"><span>⚡</span><p>Energetic</p></div>
+            <div class="mood-card" style="background:linear-gradient(135deg,#1DB954,#148A3D)"><span>🌊</span><p>Chill</p></div>
+            <div class="mood-card" style="background:linear-gradient(135deg,#DC148C,#A00F68)"><span>🎉</span><p>Party</p></div>
+            <div class="mood-card" style="background:linear-gradient(135deg,#F59B23,#C47A15)"><span>🙏</span><p>Devotional</p></div>
+            <div class="mood-card" style="background:linear-gradient(135deg,#8B5CF6,#6D3FD4)"><span>🎯</span><p>Focus</p></div>
+          </div>
+        </section>
+        <section class="section" id="section-recent">
+          <h2 class="section-title">Recently Played</h2>
+          <div class="scroll-row" id="recent-row"></div>
+        </section>
+      </div>
+
+      <!-- Search View -->
+      <div id="view-search" class="view">
+        <div class="search-container">
+          <div class="search-box">
+            <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <input type="text" id="search-input" placeholder="What do you want to listen to?" autocomplete="off" />
+            <button id="search-clear" class="search-clear hidden">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+          </div>
+          <select id="search-language-filter" style="padding:6px 10px;border-radius:16px;background:#282828;color:#b3b3b3;border:1px solid #333;font-size:13px;margin-top:8px;">
+            <option value="all">All Languages</option>
+            <option value="telugu">Telugu</option>
+            <option value="hindi">Hindi</option>
+            <option value="tamil">Tamil</option>
+            <option value="english">English</option>
+          </select>
+        </div>
+        <div id="search-results" class="search-results">
+          <div class="browse-categories" id="browse-categories">
+            <h2 class="section-title">Browse All</h2>
+            <div class="category-grid" id="category-grid"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Library View -->
+      <div id="view-library" class="view">
+        <div class="library-header">
+          <h2>Your Library</h2>
+          <button id="create-playlist-btn" class="icon-btn" aria-label="Create Playlist" style="color:#1DB954;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+          </button>
+        </div>
+        <div class="library-content" id="library-content">
+          <div class="library-item" id="liked-songs-card">
+            <div class="liked-gradient">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="#fff"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+            </div>
+            <div class="library-item-info">
+              <h3>Liked Songs</h3>
+              <p id="liked-count">0 songs</p>
+            </div>
+          </div>
+          <div class="library-item" id="recent-card">
+            <div class="recent-gradient">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="#fff"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+            </div>
+            <div class="library-item-info">
+              <h3>Recently Played</h3>
+              <p id="recent-count">0 songs</p>
+            </div>
+          </div>
+          <div class="library-item" id="history-card">
+            <div class="history-gradient">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="#fff"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z"/></svg>
+            </div>
+            <div class="library-item-info">
+              <h3>Listening History</h3>
+              <p id="history-count">0 songs</p>
+            </div>
+          </div>
+          <div id="liked-list" class="track-list hidden"></div>
+          <div id="recent-list" class="track-list hidden"></div>
+          <div id="history-list" class="track-list hidden"></div>
+          <!-- Custom Playlists -->
+          <div id="playlist-cards"></div>
+          <div id="playlist-detail-list" class="track-list hidden"></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Mini Player -->
+    <div id="mini-player" class="mini-player hidden">
+      <div class="mini-progress"><div class="mini-progress-fill" id="mini-progress-fill"></div></div>
+      <div class="mini-player-inner" id="mini-player-tap">
+        <img id="mini-art" class="mini-art" src="" alt="" />
+        <div class="mini-info">
+          <p class="mini-title" id="mini-title">Not Playing</p>
+          <p class="mini-artist" id="mini-artist"></p>
+        </div>
+        <div class="mini-controls">
+          <button id="mini-like" class="icon-btn mini-like-btn" aria-label="Like">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          </button>
+          <button id="mini-play" class="icon-btn mini-play-btn" aria-label="Play">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Now Playing (Full Screen) -->
+    <div id="now-playing" class="now-playing hidden">
+      <div class="np-bg" id="np-bg"></div>
+      <div class="np-overlay"></div>
+      <div class="np-content">
+        <div class="np-header">
+          <button id="np-close" class="icon-btn" aria-label="Close">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+          </button>
+          <span class="np-from">PLAYING FROM SEARCH</span>
+          <button id="np-queue-btn" class="icon-btn" aria-label="Queue">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></svg>
+          </button>
+        </div>
+        <div class="np-art-container">
+          <img id="np-art" class="np-art" src="" alt="Album Art" />
+          <canvas id="visualizer-canvas" class="visualizer-canvas hidden"></canvas>
+        </div>
+        <div class="np-info">
+          <div class="np-info-text">
+            <h2 id="np-title" class="np-title">Not Playing</h2>
+            <p id="np-artist" class="np-artist"></p>
+          </div>
+          <button id="np-like" class="icon-btn np-like-btn" aria-label="Like">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          </button>
+          <button id="np-radio-btn" class="icon-btn np-radio-btn-styled" aria-label="Song Radio" title="Play similar songs">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8c0-.83-.51-1.57-1.24-1.85L12 2 3.24 6.15zM7 20v-8l5 4 5-4v8"/></svg>
+          </button>
+        </div>
+        <div class="np-progress">
+          <input type="range" id="np-seek" class="np-seek" min="0" max="100" value="0" />
+          <div class="np-times">
+            <span id="np-current">0:00</span>
+            <span id="np-duration">0:00</span>
+          </div>
+        </div>
+        <div class="np-controls">
+          <button id="np-shuffle" class="icon-btn np-secondary" aria-label="Shuffle">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+          </button>
+          <button id="np-prev" class="icon-btn" aria-label="Previous">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+          </button>
+          <button id="np-play" class="np-play-btn" aria-label="Play">
+            <svg id="np-play-icon" width="30" height="30" viewBox="0 0 24 24" fill="#000"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button id="np-next" class="icon-btn" aria-label="Next">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </button>
+          <button id="np-repeat" class="icon-btn np-secondary" aria-label="Repeat">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+          </button>
+        </div>
+        <div class="np-extra">
+          <button id="np-autoplay" class="icon-btn np-secondary np-extra-btn" aria-label="Auto Play">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 6v3l4-4-4-4v3c-4.42 0-8 3.58-8 8 0 1.57.46 3.03 1.24 4.26L6.7 14.8A5.87 5.87 0 0 1 6 12c0-3.31 2.69-6 6-6zm6.76 1.74L17.3 9.2c.44.84.7 1.79.7 2.8 0 3.31-2.69 6-6 6v-3l-4 4 4 4v-3c4.42 0 8-3.58 8-8 0-1.57-.46-3.03-1.24-4.26z"/></svg>
+            <span>Autoplay</span>
+          </button>
+          <button id="np-add-playlist-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Add to Playlist">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M14 10H2v2h12v-2zm0-4H2v2h12V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM2 16h8v-2H2v2z"/></svg>
+            <span>Playlist</span>
+          </button>
+          <button id="np-lyrics-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Lyrics" style="display:none;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 9h-2v2H9v-2H7v-2h2V7h2v2h2v2zm-2 8H9v-6h2v6zm4 0h-2v-4h2v4zm2-12h-5.5V2.5L17 7z"/></svg>
+            <span>Lyrics</span>
+          </button>
+          <button id="np-share-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Share">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
+            <span>Share</span>
+          </button>
+          <button id="np-speed-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Speed">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.27-10.44z"/><path d="M10.59 15.41a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z"/></svg>
+            <span id="speed-label">1x</span>
+          </button>
+          <button id="np-sleep-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Sleep Timer">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12.34 2.02C6.59 1.82 2 6.42 2 12c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-7.51-.25-12.09-8.43-8.32-14.96z"/></svg>
+            <span id="sleep-label">Sleep</span>
+          </button>
+          <button id="np-eq-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Equalizer">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20h4V4h-4v16zm-6 0h4v-8H4v8zM16 9v11h4V9h-4z"/></svg>
+            <span>EQ</span>
+          </button>
+        </div>
+
+        <!-- Lyrics Panel (slides up inside Now Playing) -->
+        <div id="np-lyrics-panel" class="np-lyrics-panel hidden">
+          <div class="np-lyrics-header">
+            <span>Lyrics</span>
+            <button id="np-lyrics-close" class="icon-btn" aria-label="Close Lyrics">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+          </div>
+          <div id="np-lyrics-content" class="np-lyrics-content">
+            <p class="lyrics-loading">Tap to load lyrics...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sleep Timer Dialog -->
+    <div id="sleep-timer-dialog" class="dialog-overlay hidden">
+      <div class="dialog-box">
+        <h2>Sleep Timer</h2>
+        <p style="color:#b3b3b3;margin-bottom:16px;font-size:14px;" id="sleep-timer-status">Music will stop after the selected time</p>
+        <div class="sleep-timer-options">
+          <button class="sleep-option" data-minutes="5">5 min</button>
+          <button class="sleep-option" data-minutes="10">10 min</button>
+          <button class="sleep-option" data-minutes="15">15 min</button>
+          <button class="sleep-option" data-minutes="30">30 min</button>
+          <button class="sleep-option" data-minutes="45">45 min</button>
+          <button class="sleep-option" data-minutes="60">1 hour</button>
+          <button class="sleep-option" data-minutes="90">1.5 hours</button>
+          <button class="sleep-option" data-minutes="120">2 hours</button>
+        </div>
+        <button id="sleep-timer-off" style="width:100%;padding:12px;margin-top:12px;background:transparent;border:1px solid #555;border-radius:24px;color:#fff;font-size:14px;cursor:pointer;">Turn Off Timer</button>
+        <button id="sleep-timer-cancel" style="width:100%;padding:10px;margin-top:8px;background:transparent;border:none;color:#b3b3b3;font-size:13px;cursor:pointer;">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Equalizer Dialog -->
+    <div id="eq-dialog" class="dialog-overlay hidden">
+      <div class="dialog-box" style="max-width:400px;">
+        <h2>Equalizer</h2>
+        <p style="color:#b3b3b3;margin-bottom:16px;font-size:14px;">Audio Enhancement</p>
+        <div class="eq-presets">
+          <button class="eq-preset active" data-preset="off">Off</button>
+          <button class="eq-preset" data-preset="bass-boost">Bass Boost</button>
+          <button class="eq-preset" data-preset="treble-boost">Treble Boost</button>
+          <button class="eq-preset" data-preset="vocal">Vocal</button>
+          <button class="eq-preset" data-preset="rock">Rock</button>
+          <button class="eq-preset" data-preset="pop">Pop</button>
+          <button class="eq-preset" data-preset="classical">Classical</button>
+          <button class="eq-preset" data-preset="jazz">Jazz</button>
+          <button class="eq-preset" data-preset="electronic">Electronic</button>
+        </div>
+        <div class="eq-sliders" id="eq-sliders">
+          <div class="eq-slider-group">
+            <label>Bass</label>
+            <input type="range" id="eq-bass" class="eq-range" min="-12" max="12" value="0" step="1" />
+            <span class="eq-val" id="eq-bass-val">0 dB</span>
+          </div>
+          <div class="eq-slider-group">
+            <label>Mid</label>
+            <input type="range" id="eq-mid" class="eq-range" min="-12" max="12" value="0" step="1" />
+            <span class="eq-val" id="eq-mid-val">0 dB</span>
+          </div>
+          <div class="eq-slider-group">
+            <label>Treble</label>
+            <input type="range" id="eq-treble" class="eq-range" min="-12" max="12" value="0" step="1" />
+            <span class="eq-val" id="eq-treble-val">0 dB</span>
+          </div>
+        </div>
+        <button id="eq-close" style="width:100%;padding:12px;margin-top:16px;border-radius:24px;background:#1DB954;color:#000;font-weight:bold;border:none;font-size:15px;cursor:pointer;">Done</button>
+      </div>
+    </div>
+
+    <!-- Playback Speed Dialog -->
+    <div id="speed-dialog" class="dialog-overlay hidden">
+      <div class="dialog-box">
+        <h2>Playback Speed</h2>
+        <p style="color:#b3b3b3;margin-bottom:16px;font-size:14px;">Adjust how fast the music plays</p>
+        <div class="speed-options">
+          <button class="speed-option" data-speed="0.5">0.5x</button>
+          <button class="speed-option" data-speed="0.75">0.75x</button>
+          <button class="speed-option active" data-speed="1">1x</button>
+          <button class="speed-option" data-speed="1.25">1.25x</button>
+          <button class="speed-option" data-speed="1.5">1.5x</button>
+          <button class="speed-option" data-speed="2">2x</button>
+        </div>
+        <button id="speed-close" style="width:100%;padding:12px;margin-top:16px;border-radius:24px;background:#1DB954;color:#000;font-weight:bold;border:none;font-size:15px;cursor:pointer;">Done</button>
+      </div>
+    </div>
+
+    <!-- Alarm Dialog -->
+    <div id="alarm-dialog" class="dialog-overlay hidden">
+      <div class="dialog-box" style="max-width:400px;">
+        <h2 style="display:flex;align-items:center;justify-content:center;gap:8px;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="#1DB954"><path d="M22 5.72l-4.6-3.86-1.29 1.53 4.6 3.86L22 5.72zM7.88 3.39L6.6 1.86 2 5.71l1.29 1.53 4.59-3.85zM12.5 8H11v6l4.75 2.85.75-1.23-4-2.37V8zM12 4c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+          Alarm Clock
+        </h2>
+        <p style="color:#b3b3b3;margin-bottom:16px;font-size:13px;">Wake up to your favorite song! Keep this tab open for alarm to work.</p>
+
+        <!-- Time Picker -->
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:20px;">
+          <input type="time" id="alarm-time-input" style="font-size:28px;font-weight:700;background:#1a1a1a;color:#fff;border:2px solid #333;border-radius:12px;padding:12px 16px;text-align:center;width:180px;" />
+        </div>
+
+        <!-- Quick time buttons -->
+        <div style="display:flex;gap:6px;justify-content:center;margin-bottom:16px;flex-wrap:wrap;">
+          <button class="alarm-quick-time" data-offset="5" style="padding:6px 12px;border-radius:16px;background:rgba(255,255,255,0.08);color:#b3b3b3;border:none;font-size:12px;cursor:pointer;">+5 min</button>
+          <button class="alarm-quick-time" data-offset="15" style="padding:6px 12px;border-radius:16px;background:rgba(255,255,255,0.08);color:#b3b3b3;border:none;font-size:12px;cursor:pointer;">+15 min</button>
+          <button class="alarm-quick-time" data-offset="30" style="padding:6px 12px;border-radius:16px;background:rgba(255,255,255,0.08);color:#b3b3b3;border:none;font-size:12px;cursor:pointer;">+30 min</button>
+          <button class="alarm-quick-time" data-offset="60" style="padding:6px 12px;border-radius:16px;background:rgba(255,255,255,0.08);color:#b3b3b3;border:none;font-size:12px;cursor:pointer;">+1 hr</button>
+          <button class="alarm-quick-time" data-offset="480" style="padding:6px 12px;border-radius:16px;background:rgba(255,255,255,0.08);color:#b3b3b3;border:none;font-size:12px;cursor:pointer;">+8 hrs</button>
+        </div>
+
+        <!-- Song Search -->
+        <div style="margin-bottom:16px;">
+          <label style="font-size:13px;color:#b3b3b3;display:block;margin-bottom:6px;">Wake up song (search or use current)</label>
+          <div style="position:relative;">
+            <input type="text" id="alarm-song-search" placeholder="Search a song..." style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;font-size:14px;" />
+            <div id="alarm-search-results" class="hidden" style="position:absolute;top:100%;left:0;right:0;background:#282828;border-radius:0 0 10px 10px;max-height:180px;overflow-y:auto;z-index:10;border:1px solid #333;border-top:none;"></div>
+          </div>
+          <div id="alarm-selected-song" style="margin-top:8px;padding:10px;background:rgba(29,185,84,0.1);border-radius:10px;display:flex;align-items:center;gap:10px;" class="hidden">
+            <img id="alarm-song-art" style="width:40px;height:40px;border-radius:6px;object-fit:cover;" src="" alt="" />
+            <div style="flex:1;min-width:0;">
+              <p id="alarm-song-title" style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></p>
+              <p id="alarm-song-artist" style="font-size:11px;color:#b3b3b3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></p>
+            </div>
+            <button id="alarm-clear-song" style="background:none;border:none;color:#b3b3b3;cursor:pointer;font-size:18px;">&times;</button>
+          </div>
+        </div>
+
+        <!-- Options -->
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+          <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:13px;color:#b3b3b3;background:rgba(255,255,255,0.05);padding:10px;border-radius:8px;cursor:pointer;">
+            <input type="checkbox" id="alarm-autoplay" checked style="accent-color:#1DB954;" />
+            Auto-play after alarm song
+          </label>
+        </div>
+
+        <!-- Volume Ramp -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;">
+          <span style="font-size:12px;color:#b3b3b3;">Gentle wake (volume ramp)</span>
+          <input type="checkbox" id="alarm-gentle" checked style="accent-color:#1DB954;" />
+        </div>
+
+        <!-- Keep-alive info -->
+        <div id="alarm-keep-alive-info" style="background:rgba(255,180,0,0.1);border:1px solid rgba(255,180,0,0.3);border-radius:10px;padding:10px 12px;margin-bottom:12px;">
+          <p style="font-size:11px;color:#ffb400;margin:0;">📱 <strong>Mobile tip:</strong> Keep Raagam open in browser for reliable alarms. On Android, add to Home Screen for best results.</p>
+        </div>
+
+        <!-- Action buttons -->
+        <button id="alarm-set-btn" style="width:100%;padding:14px;border-radius:24px;background:#1DB954;color:#000;font-weight:bold;border:none;font-size:16px;cursor:pointer;">Set Alarm</button>
+        <button id="alarm-cancel-btn" style="width:100%;padding:10px;margin-top:8px;background:transparent;border:none;color:#b3b3b3;font-size:13px;cursor:pointer;">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Create Playlist Dialog -->
+    <div id="create-playlist-dialog" class="dialog-overlay hidden">
+      <div class="dialog-box">
+        <h2>New Playlist</h2>
+        <input type="text" id="new-playlist-name" placeholder="Playlist name" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;font-size:16px;margin:16px 0;" />
+        <button id="create-playlist-save" style="width:100%;padding:12px;border-radius:24px;background:#1DB954;color:#000;font-weight:bold;border:none;font-size:15px;cursor:pointer;">Create</button>
+        <button id="create-playlist-cancel" style="width:100%;padding:10px;margin-top:8px;background:transparent;border:none;color:#b3b3b3;font-size:13px;cursor:pointer;">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Add to Playlist Dialog -->
+    <div id="add-to-playlist-dialog" class="dialog-overlay hidden">
+      <div class="dialog-box">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h2>Add to Playlist</h2>
+          <button id="add-to-playlist-close" class="icon-btn" aria-label="Close">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+        <div id="add-to-playlist-list" class="add-to-playlist-list"></div>
+      </div>
+    </div>
+
+    <!-- Crossfade Dialog -->
+    <div id="crossfade-dialog" class="dialog-overlay hidden">
+      <div class="dialog-box">
+        <h2>Crossfade</h2>
+        <p style="color:#b3b3b3;margin-bottom:16px;font-size:14px;">Smooth transitions between songs</p>
+        <div class="crossfade-options">
+          <button class="crossfade-option" data-seconds="0">Off</button>
+          <button class="crossfade-option" data-seconds="3">3s</button>
+          <button class="crossfade-option" data-seconds="5">5s</button>
+          <button class="crossfade-option" data-seconds="8">8s</button>
+          <button class="crossfade-option" data-seconds="10">10s</button>
+          <button class="crossfade-option" data-seconds="12">12s</button>
+        </div>
+        <button id="crossfade-close" style="width:100%;padding:12px;margin-top:16px;border-radius:24px;background:#1DB954;color:#000;font-weight:bold;border:none;font-size:15px;cursor:pointer;">Done</button>
+      </div>
+    </div>
+
+    <!-- Queue Panel -->
+    <div id="queue-panel" class="queue-panel hidden">
+      <div class="queue-header">
+        <button id="queue-close" class="icon-btn" aria-label="Close">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+        <h2>Queue</h2>
+        <button id="queue-clear" class="text-btn">Clear</button>
+      </div>
+      <div class="queue-list" id="queue-list"></div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div id="settings-panel" class="settings-panel hidden">
+      <div class="settings-header">
+        <button id="settings-close" class="icon-btn" aria-label="Close">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+        <h2>Settings</h2>
+        <span></span>
+      </div>
+      <div class="settings-content">
+        <div class="setting-item">
+          <span>Audio Quality</span>
+          <select id="audio-quality">
+            <option value="4">High (320kbps)</option>
+            <option value="3" selected>Medium (160kbps)</option>
+            <option value="2">Low (96kbps)</option>
+            <option value="1">Data Saver (48kbps)</option>
+          </select>
+        </div>
+        <div class="setting-item">
+          <span>API Server</span>
+          <select id="api-server">
+            <option value="https://jiosaavn-api-privatecvc2.vercel.app">Vercel Mirror 1 (Primary)</option>
+            <option value="https://saavn-api.vercel.app">Vercel Mirror 2</option>
+            <option value="https://jiosaavn-api-2.vercel.app">Vercel Mirror 3</option>
+            <option value="https://jiosaavn-api-rose.vercel.app">Vercel Mirror 4</option>
+            <option value="https://jiosaavn-api-ivory.vercel.app">Vercel Mirror 5</option>
+            <option value="https://saavn.dev/api">saavn.dev (Fallback)</option>
+          </select>
+        </div>
+        <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span>API Health Status</span>
+            <button id="health-check-btn" style="background:#1DB954;color:#fff;border:none;border-radius:12px;padding:4px 12px;font-size:12px;cursor:pointer;">Check Now</button>
+          </div>
+          <div id="api-health-status" style="font-size:11px;color:#b3b3b3;background:#1a1a1a;border-radius:8px;padding:8px;font-family:monospace;white-space:pre-line;max-height:120px;overflow-y:auto;">Loading...</div>
+        </div>
+        <div class="setting-item">
+          <span>Sleep Timer</span>
+          <button id="settings-sleep-timer" style="background:var(--bg-card);color:var(--text-primary);border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">Off</button>
+        </div>
+        <div class="setting-item">
+          <span>Equalizer</span>
+          <button id="settings-eq" style="background:var(--bg-card);color:var(--text-primary);border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">Off</button>
+        </div>
+        <div class="setting-item">
+          <span>Playback Speed</span>
+          <button id="settings-speed" style="background:var(--bg-card);color:var(--text-primary);border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">1x</button>
+        </div>
+        <div class="setting-item">
+          <span>Crossfade</span>
+          <button id="settings-crossfade" style="background:var(--bg-card);color:var(--text-primary);border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">Off</button>
+        </div>
+        <div class="setting-item">
+          <span>Smart Queue</span>
+          <label style="display:flex;align-items:center;cursor:pointer;">
+            <input type="checkbox" id="smart-queue-toggle" checked style="accent-color:#1DB954;width:18px;height:18px;" />
+          </label>
+        </div>
+        <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="display:flex;align-items:center;gap:6px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M22 5.72l-4.6-3.86-1.29 1.53 4.6 3.86L22 5.72zM7.88 3.39L6.6 1.86 2 5.71l1.29 1.53 4.59-3.85zM12.5 8H11v6l4.75 2.85.75-1.23-4-2.37V8zM12 4c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+              Alarm Clock
+            </span>
+            <button id="settings-alarm" style="background:var(--bg-card);color:var(--text-primary);border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">Off</button>
+          </div>
+          <div id="alarm-status-bar" class="hidden" style="background:rgba(29,185,84,0.1);border:1px solid rgba(29,185,84,0.3);border-radius:10px;padding:10px 12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <span id="alarm-status-time" style="font-size:18px;font-weight:700;color:#1DB954;"></span>
+                <p id="alarm-status-song" style="font-size:11px;color:#b3b3b3;margin-top:2px;"></p>
+              </div>
+              <button id="alarm-cancel-quick" style="background:rgba(255,60,60,0.15);color:#ff5252;border:1px solid rgba(255,60,60,0.3);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">Cancel</button>
+            </div>
+            <p id="alarm-keepalive-status" style="font-size:10px;color:#b3b3b3;margin-top:6px;">🔋 Keep-alive active — alarm will work in background</p>
+          </div>
+        </div>
+        <div class="setting-item">
+          <span>App Features & Guide</span>
+          <button id="settings-features-btn" style="background:linear-gradient(135deg,#7c3aed,#06b6d4);color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;">View All Features</button>
+        </div>
+        <div class="setting-item">
+          <span class="about-text">Raagam v3.2 — Built with JioSaavn API</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav" id="bottom-nav">
+      <button class="nav-item active" data-view="home">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+        <span>Home</span>
+      </button>
+      <button class="nav-item" data-view="search">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <span>Search</span>
+      </button>
+      <button class="nav-item" data-view="library">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 5h-3v5.5a2.5 2.5 0 0 1-5 0 2.5 2.5 0 0 1 2.5-2.5c.57 0 1.08.19 1.5.51V5h4v2zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6z"/></svg>
+        <span>Library</span>
+      </button>
+      <button class="nav-item" id="nav-dj" data-view="dj">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-12.5c-2.49 0-4.5 2.01-4.5 4.5s2.01 4.5 4.5 4.5 4.5-2.01 4.5-4.5-2.01-4.5-4.5-4.5zm0 5.5c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>
+        <span>DJ</span>
+      </button>
+    </nav>
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <!-- Profile Dialog -->
+  <div id="profile-dialog" class="dialog-overlay hidden">
+    <div class="dialog-box">
+      <h2>Welcome to Raagam</h2>
+      <p style="color:#b3b3b3;margin-bottom:1rem;">Set up your profile (optional)</p>
+      <form id="profile-form">
+        <input type="text" id="user-name" placeholder="Your name" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:12px;font-size:16px;" />
+        <input type="tel" id="user-phone" placeholder="Phone (optional)" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:16px;font-size:16px;" />
+        <button type="submit" style="width:100%;padding:12px;border-radius:24px;background:#1DB954;color:#000;font-weight:bold;border:none;font-size:16px;cursor:pointer;">Continue</button>
+      </form>
+      <button id="skip-profile" style="width:100%;padding:12px;margin-top:8px;background:transparent;border:1px solid #555;border-radius:24px;color:#fff;font-size:14px;cursor:pointer;">Skip for now</button>
+    </div>
+  </div>
+
+  <!-- Language Dialog -->
+  <div id="language-dialog" class="dialog-overlay hidden">
+    <div class="dialog-box">
+      <h2>Choose Language</h2>
+      <select id="preferred-language" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;font-size:16px;">
+        <option value="all">All Languages</option>
+        <option value="telugu">Telugu</option>
+        <option value="hindi">Hindi</option>
+        <option value="tamil">Tamil</option>
+        <option value="english">English</option>
+        <option value="kannada">Kannada</option>
+        <option value="malayalam">Malayalam</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- DJ Mixer — Separate Full-Screen View -->
+  <div id="dj-mixer-view" class="dj-mixer-view hidden">
+    <!-- DJ Top Bar -->
+    <div class="dj-topbar">
+      <div class="dj-topbar-left">
+        <button id="dj-exit" class="dj-btn dj-exit-btn" aria-label="Exit DJ">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+        <h1 class="dj-logo">RAAGAM <span>DJ</span></h1>
+      </div>
+      <div class="dj-topbar-center">
+        <button id="dj-autofill" class="dj-btn dj-autofill-btn">⚡ Auto-Fill</button>
+        <select id="dj-autofill-lang" class="dj-btn dj-autofill-lang" title="Auto-Fill Language">
+          <option value="all">🌐 All</option>
+          <option value="hindi">Hindi</option>
+          <option value="telugu">Telugu</option>
+          <option value="tamil">Tamil</option>
+          <option value="english">English</option>
+          <option value="kannada">Kannada</option>
+          <option value="malayalam">Malayalam</option>
+          <option value="punjabi">Punjabi</option>
+        </select>
+        <button id="dj-autodj-toggle" class="dj-btn dj-autodj-btn" title="Auto DJ — fully automated mixing">
+          🎧 Auto DJ
+        </button>
+        <button id="dj-layout-toggle" class="dj-btn dj-layout-toggle-btn" title="Switch EQ layout">
+          <span class="dj-lt-icon">🎛</span> <span class="dj-lt-label">Knobs</span>
+        </button>
+        <button id="dj-autoeq-toggle" class="dj-btn dj-autoeq-btn" title="Auto DJ EQ — auto-adjusts EQ based on song">
+          🤖 Auto EQ
+        </button>
+        <button id="dj-help-btn" class="dj-btn dj-help-btn" title="DJ Guide — how to use everything">
+          ❓ Guide
+        </button>
+      </div>
+      <div class="dj-topbar-right">
+        <label class="dj-master-label">MASTER</label>
+        <input type="range" id="dj-master-vol" class="dj-master-slider" min="0" max="100" value="100" />
+        <span id="dj-master-val" class="dj-master-val">100%</span>
+      </div>
+    </div>
+
+    <!-- DJ Decks Container -->
+    <div class="dj-decks-wrapper">
+      <div class="dj-decks" id="dj-decks">
+        <!-- Deck cards rendered dynamically by JS -->
+      </div>
+      <button id="dj-add-deck" class="dj-btn dj-add-deck-btn">+ Add Deck</button>
+    </div>
+
+    <!-- DJ Crossfader -->
+    <div class="dj-crossfader-section">
+      <div class="dj-cf-assign">
+        <select id="dj-cf-a" class="dj-cf-select"><option value="0">Deck 1</option></select>
+        <span class="dj-cf-label">A</span>
+      </div>
+      <div class="dj-cf-track">
+        <span class="dj-cf-side">A</span>
+        <input type="range" id="dj-crossfader" class="dj-crossfader-slider" min="0" max="100" value="50" />
+        <span class="dj-cf-side">B</span>
+      </div>
+      <div class="dj-cf-assign">
+        <span class="dj-cf-label">B</span>
+        <select id="dj-cf-b" class="dj-cf-select"><option value="1">Deck 2</option></select>
+      </div>
+    </div>
+
+    <!-- DJ Search Modal -->
+    <div id="dj-search-modal" class="dj-search-modal hidden">
+      <div class="dj-search-box">
+        <div class="dj-search-header">
+          <h2>Load Track — <span id="dj-search-deck-label">Deck 1</span></h2>
+          <button id="dj-search-close" class="dj-btn dj-exit-btn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+        <div class="dj-search-input-row">
+          <input type="text" id="dj-search-input" class="dj-search-input" placeholder="Search songs..." autocomplete="off" />
+          <select id="dj-search-lang" class="dj-search-lang">
+            <option value="all">All</option><option value="telugu">Telugu</option><option value="hindi">Hindi</option><option value="tamil">Tamil</option><option value="english">English</option>
+          </select>
+        </div>
+        <div id="dj-search-results" class="dj-search-results"></div>
+      </div>
+    </div>
+  </div>
+
+  <audio id="audio" preload="auto"></audio>
+  <script src="app.js"></script>
+</body>
 </html>

@@ -423,6 +423,392 @@ app.get('/api/analytics/export', (req, res) => {
   }
 });
 
+// ===== Enhanced Analytics Endpoints for Admin Dashboard =====
+
+// Full dashboard data in one call
+app.get('/api/analytics/admin/overview', (req, res) => {
+  try {
+    const db = getDb();
+    const days = parseInt(req.query.days) || 30;
+
+    // KPI summary
+    const kpis = db.prepare(`
+      SELECT
+        COUNT(*) as total_sessions,
+        COUNT(DISTINCT ip_address) as unique_visitors,
+        ROUND(AVG(duration) / 1000.0, 1) as avg_session_sec,
+        MAX(start_time) as last_session_time,
+        MIN(start_time) as first_session_time
+      FROM analytics_sessions
+      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+    `).get();
+
+    // Today's stats
+    const today = db.prepare(`
+      SELECT
+        COUNT(*) as sessions_today,
+        COUNT(DISTINCT ip_address) as visitors_today
+      FROM analytics_sessions
+      WHERE DATE(start_time/1000, 'unixepoch') = DATE('now')
+    `).get();
+
+    // Total events
+    const eventCount = db.prepare(`
+      SELECT COUNT(*) as total FROM analytics_events
+      WHERE timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+    `).get();
+
+    // Sessions per day (trend)
+    const dailyTrend = db.prepare(`
+      SELECT
+        DATE(start_time/1000, 'unixepoch') as date,
+        COUNT(*) as sessions,
+        COUNT(DISTINCT ip_address) as unique_users,
+        ROUND(AVG(duration)/1000.0, 1) as avg_duration_sec
+      FROM analytics_sessions
+      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY date ORDER BY date
+    `).all();
+
+    // Hourly heatmap (which hours are busiest)
+    const hourlyHeatmap = db.prepare(`
+      SELECT
+        CAST(strftime('%H', start_time/1000, 'unixepoch') AS INTEGER) as hour,
+        COUNT(*) as sessions
+      FROM analytics_sessions
+      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY hour ORDER BY hour
+    `).all();
+
+    // Event type breakdown
+    const eventBreakdown = db.prepare(`
+      SELECT event_type, COUNT(*) as count
+      FROM analytics_events
+      WHERE timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY event_type ORDER BY count DESC
+    `).all();
+
+    res.json({ kpis, today, eventCount, dailyTrend, hourlyHeatmap, eventBreakdown });
+  } catch (err) {
+    console.error('Admin overview error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Browser & device breakdown
+app.get('/api/analytics/admin/devices', (req, res) => {
+  try {
+    const db = getDb();
+    const days = parseInt(req.query.days) || 30;
+
+    // Extract browser from session_start events
+    const browsers = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.browser') as browser,
+        JSON_EXTRACT(event_data, '$.browserVersion') as version,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'session_start'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY browser ORDER BY count DESC
+    `).all();
+
+    // OS breakdown
+    const operatingSystems = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.os') as os,
+        JSON_EXTRACT(event_data, '$.osVersion') as version,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'session_start'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY os ORDER BY count DESC
+    `).all();
+
+    // Device types
+    const deviceTypes = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.deviceType') as device_type,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'session_start'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY device_type ORDER BY count DESC
+    `).all();
+
+    // Device models
+    const deviceModels = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.deviceModel') as model,
+        JSON_EXTRACT(event_data, '$.os') as os,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'session_start'
+        AND JSON_EXTRACT(event_data, '$.deviceModel') IS NOT NULL
+        AND JSON_EXTRACT(event_data, '$.deviceModel') != ''
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY model ORDER BY count DESC LIMIT 20
+    `).all();
+
+    // Screen sizes
+    const screenSizes = db.prepare(`
+      SELECT screen_size, COUNT(*) as count
+      FROM analytics_sessions
+      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+        AND screen_size IS NOT NULL
+      GROUP BY screen_size ORDER BY count DESC LIMIT 15
+    `).all();
+
+    // Connection types
+    const connections = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.effectiveType') as connection,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'session_start'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY connection ORDER BY count DESC
+    `).all();
+
+    res.json({ browsers, operatingSystems, deviceTypes, deviceModels, screenSizes, connections });
+  } catch (err) {
+    console.error('Devices error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Audience & geography
+app.get('/api/analytics/admin/audience', (req, res) => {
+  try {
+    const db = getDb();
+    const days = parseInt(req.query.days) || 30;
+
+    // Timezone distribution (proxy for geography)
+    const timezones = db.prepare(`
+      SELECT timezone, COUNT(*) as count
+      FROM analytics_sessions
+      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timezone IS NOT NULL
+      GROUP BY timezone ORDER BY count DESC
+    `).all();
+
+    // Language
+    const languages = db.prepare(`
+      SELECT language, COUNT(*) as count
+      FROM analytics_sessions
+      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY language ORDER BY count DESC
+    `).all();
+
+    // New vs returning
+    const newVsReturning = db.prepare(`
+      SELECT
+        CASE WHEN JSON_EXTRACT(event_data, '$.isReturningUser') = 1 THEN 'Returning' ELSE 'New' END as user_type,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'session_start'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY user_type
+    `).all();
+
+    // Color scheme preference
+    const colorScheme = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.colorScheme') as scheme,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'session_start'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY scheme
+    `).all();
+
+    // Standalone (PWA) vs browser
+    const installMode = db.prepare(`
+      SELECT
+        CASE WHEN JSON_EXTRACT(event_data, '$.isStandalone') = 1 THEN 'PWA/Standalone' ELSE 'Browser' END as mode,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'session_start'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY mode
+    `).all();
+
+    res.json({ timezones, languages, newVsReturning, colorScheme, installMode });
+  } catch (err) {
+    console.error('Audience error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Engagement metrics
+app.get('/api/analytics/admin/engagement', (req, res) => {
+  try {
+    const db = getDb();
+    const days = parseInt(req.query.days) || 30;
+
+    // Session duration distribution
+    const durationBuckets = db.prepare(`
+      SELECT
+        CASE
+          WHEN duration < 10000 THEN '0-10s (Bounce)'
+          WHEN duration < 30000 THEN '10-30s'
+          WHEN duration < 60000 THEN '30s-1m'
+          WHEN duration < 300000 THEN '1-5m'
+          WHEN duration < 600000 THEN '5-10m'
+          WHEN duration < 1800000 THEN '10-30m'
+          ELSE '30m+'
+        END as bucket,
+        COUNT(*) as count
+      FROM analytics_sessions
+      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+        AND duration IS NOT NULL
+      GROUP BY bucket ORDER BY MIN(duration)
+    `).all();
+
+    // Feature usage
+    const featureUsage = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.feature') as feature,
+        COUNT(*) as usage_count
+      FROM analytics_events
+      WHERE event_type = 'feature_usage'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY feature ORDER BY usage_count DESC
+    `).all();
+
+    // Music actions breakdown
+    const musicActions = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.action') as action,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'music_action'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY action ORDER BY count DESC
+    `).all();
+
+    // View navigation patterns
+    const viewTransitions = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.fromView') as from_view,
+        JSON_EXTRACT(event_data, '$.toView') as to_view,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'navigation'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY from_view, to_view ORDER BY count DESC LIMIT 20
+    `).all();
+
+    // Avg tracks per session
+    const tracksPerSession = db.prepare(`
+      SELECT
+        e.session_id,
+        COUNT(*) as tracks_played
+      FROM analytics_events e
+      WHERE e.event_type = 'music_action'
+        AND JSON_EXTRACT(e.event_data, '$.action') = 'play'
+        AND e.timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY e.session_id
+    `).all();
+    const avgTracksPerSession = tracksPerSession.length > 0
+      ? (tracksPerSession.reduce((s,r) => s + r.tracks_played, 0) / tracksPerSession.length).toFixed(1)
+      : 0;
+
+    res.json({ durationBuckets, featureUsage, musicActions, viewTransitions, avgTracksPerSession });
+  } catch (err) {
+    console.error('Engagement error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Errors & issues
+app.get('/api/analytics/admin/errors', (req, res) => {
+  try {
+    const db = getDb();
+    const days = parseInt(req.query.days) || 30;
+
+    const jsErrors = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.message') as message,
+        JSON_EXTRACT(event_data, '$.filename') as filename,
+        JSON_EXTRACT(event_data, '$.lineno') as line,
+        COUNT(*) as count,
+        MAX(timestamp) as last_seen
+      FROM analytics_events
+      WHERE event_type = 'js_error'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY message ORDER BY count DESC LIMIT 20
+    `).all();
+
+    const playbackErrors = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.trackName') as track,
+        JSON_EXTRACT(event_data, '$.error') as error,
+        COUNT(*) as count,
+        MAX(timestamp) as last_seen
+      FROM analytics_events
+      WHERE event_type = 'playback_error'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY error ORDER BY count DESC LIMIT 20
+    `).all();
+
+    const promiseErrors = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.reason') as reason,
+        COUNT(*) as count,
+        MAX(timestamp) as last_seen
+      FROM analytics_events
+      WHERE event_type = 'promise_error'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY reason ORDER BY count DESC LIMIT 20
+    `).all();
+
+    const connectivityIssues = db.prepare(`
+      SELECT
+        JSON_EXTRACT(event_data, '$.online') as went_online,
+        COUNT(*) as count
+      FROM analytics_events
+      WHERE event_type = 'connectivity'
+        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      GROUP BY went_online
+    `).all();
+
+    res.json({ jsErrors, playbackErrors, promiseErrors, connectivityIssues });
+  } catch (err) {
+    console.error('Errors endpoint error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Recent sessions list
+app.get('/api/analytics/admin/sessions', (req, res) => {
+  try {
+    const db = getDb();
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
+
+    const sessions = db.prepare(`
+      SELECT
+        s.*,
+        (SELECT COUNT(*) FROM analytics_events WHERE session_id = s.id) as event_count,
+        (SELECT JSON_EXTRACT(event_data, '$.browser') FROM analytics_events WHERE session_id = s.id AND event_type = 'session_start' LIMIT 1) as browser,
+        (SELECT JSON_EXTRACT(event_data, '$.os') FROM analytics_events WHERE session_id = s.id AND event_type = 'session_start' LIMIT 1) as os,
+        (SELECT JSON_EXTRACT(event_data, '$.deviceType') FROM analytics_events WHERE session_id = s.id AND event_type = 'session_start' LIMIT 1) as device_type,
+        (SELECT JSON_EXTRACT(event_data, '$.deviceModel') FROM analytics_events WHERE session_id = s.id AND event_type = 'session_start' LIMIT 1) as device_model
+      FROM analytics_sessions s
+      ORDER BY s.start_time DESC
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
+
+    const total = db.prepare('SELECT COUNT(*) as count FROM analytics_sessions').get();
+
+    res.json({ sessions, total: total.count, limit, offset });
+  } catch (err) {
+    console.error('Sessions list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
