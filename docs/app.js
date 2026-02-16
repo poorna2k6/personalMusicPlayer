@@ -100,7 +100,15 @@ const state = {
   djAutoFillLang: localStorage.getItem('raagam_djAutoFillLang') || 'all',
   djAutoDJEnabled: false,
   djAutoDJInterval: null,
-  djAutoLoadNext: {} // { [deckId]: { enabled: bool, timer: number (seconds) } }
+  // { [deckId]: { enabled: bool, timer: number (seconds) } }
+  djAutoLoadNext: {},
+  // Offline Mode
+  offlineMode: false,
+  offlineTracks: new Set(), // Set of track IDs that are downloaded
+  offlineDB: null, // IndexedDB instance
+  offlineStorageQuota: null, // Available storage in bytes
+  offlineDownloadQueue: [], // Queue of tracks to download
+  offlineDownloading: new Set() // Set of track IDs currently downloading
 };
 
 // ===== Analytics & Tracking =====
@@ -962,6 +970,7 @@ function renderResultItem(track, showArt = true) {
       <p class="result-sub"><span class="artist-link" data-artist="${artistName.replace(/"/g, '&quot;')}">${artistName}</span>${getAlbumName(track) ? ' · ' + getAlbumName(track) : ''}</p>
     </div>
     <div class="result-actions">
+      <button class="download-btn icon-btn" aria-label="Download for offline" title="Download for offline" style="padding:6px;">↓</button>
       <button class="result-radio-btn icon-btn" aria-label="Song Radio" title="Song Radio" style="padding:6px;">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="#b3b3b3"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8c0-.83-.51-1.57-1.24-1.85L12 2 3.24 6.15zM7 20v-8l5 4 5-4v8"/></svg>
       </button>
@@ -979,6 +988,10 @@ function renderResultItem(track, showArt = true) {
       openArtistProfile(artistName);
     });
   }
+
+  // Add download button functionality
+  addDownloadButtonToResult(div, track);
+
   const radioBtn = div.querySelector('.result-radio-btn');
   if (radioBtn) radioBtn.addEventListener('click', (e) => { e.stopPropagation(); startSongRadio(track); });
   const addPlBtn = div.querySelector('.result-add-playlist-btn');
@@ -1153,6 +1166,12 @@ function setupSearch() {
       performSearch(q);
     });
   });
+
+  // Voice search
+  const voiceBtn = $('#voice-search-btn');
+  if (voiceBtn) {
+    voiceBtn.addEventListener('click', startVoiceSearch);
+  }
 }
 
 function renderSearchTabs(container, query) {
@@ -1227,6 +1246,29 @@ async function performSearch(query) {
 
     albums.forEach(album => resultsContainer.appendChild(renderAlbumItem(album)));
     analytics.trackSearch(query, albums.length, languageFilter);
+  } else if (state.searchTab === 'podcasts') {
+    // Podcast search
+    const podcasts = await searchPodcasts(searchQuery);
+    resultsContainer.querySelectorAll('.loader').forEach(e => e.remove());
+
+    if (podcasts.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.innerHTML = `
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+        <p>No podcasts found for "${query}"</p>
+      `;
+      resultsContainer.appendChild(empty);
+      return;
+    }
+
+    const title = document.createElement('p');
+    title.className = 'result-section-title';
+    title.textContent = 'Podcasts';
+    resultsContainer.appendChild(title);
+
+    podcasts.forEach(podcast => resultsContainer.appendChild(renderPodcastItem(podcast)));
+    analytics.trackSearch(query, podcasts.length, languageFilter);
   } else {
     // Song search (existing)
     const tracks = await apiSearch(searchQuery, 25);
@@ -1236,6 +1278,9 @@ async function performSearch(query) {
     if (languageFilter && languageFilter !== 'all') {
       filteredTracks = tracks.filter(track => detectLanguage(track) === languageFilter);
     }
+
+    // Apply parental controls filtering
+    filteredTracks = filterSearchResults(filteredTracks);
 
     if (filteredTracks.length === 0) {
       const empty = document.createElement('div');
@@ -1419,6 +1464,12 @@ function playSong(track, addToQueue = true) {
   audio.playbackRate = state.playbackSpeed; // Maintain speed setting
   audio.play().then(() => {
     state.isPlaying = true;
+    // Track user stats
+    if (state.userProfile) {
+      state.userProfile.stats.totalSongsPlayed++;
+      state.playStartTime = Date.now();
+      saveUserProfile();
+    }
     updatePlayerUI();
     analytics.trackMusicAction('play', {
       trackId: track.id,
@@ -6079,6 +6130,18 @@ function setupEvents() {
   const alarmCancelQuick = $('#alarm-cancel-quick');
   if (alarmCancelQuick) alarmCancelQuick.addEventListener('click', cancelAlarm);
 
+  // Theme Scheduler
+  const themeSchedulerBtn = $('#theme-scheduler-btn');
+  if (themeSchedulerBtn) themeSchedulerBtn.addEventListener('click', () => { closeSettings(); openThemeSchedulerDialog(); });
+
+  // Parental Controls
+  const parentalControlsBtn = $('#parental-controls-btn');
+  if (parentalControlsBtn) parentalControlsBtn.addEventListener('click', () => { closeSettings(); openParentalControlsDialog(); });
+
+  // User Profile
+  const userProfileBtn = $('#user-profile-btn');
+  if (userProfileBtn) userProfileBtn.addEventListener('click', () => { closeSettings(); openUserProfileDialog(); });
+
   // Alarm song search with debounce
   const alarmSearchInput = $('#alarm-song-search');
   if (alarmSearchInput) {
@@ -6165,6 +6228,10 @@ function setupEvents() {
       showToast(state.smartQueueEnabled ? 'Smart Queue enabled' : 'Smart Queue disabled');
     });
   }
+
+  // Offline mode toggle
+  const offlineBtn = $('#settings-offline-btn');
+  if (offlineBtn) offlineBtn.addEventListener('click', toggleOfflineMode);
 
   // Queue drag & drop
   setupQueueDrag();
@@ -6508,6 +6575,1216 @@ function init() {
   loadHome();
 }
 
+// ===== USER PROFILES =====
+
+// User profile functionality
+function initUserProfiles() {
+  // Load saved user profile
+  const saved = localStorage.getItem('raagam_user_profile');
+  if (saved) {
+    try {
+      state.userProfile = JSON.parse(saved);
+    } catch (e) {
+      state.userProfile = createDefaultProfile();
+    }
+  } else {
+    state.userProfile = createDefaultProfile();
+  }
+
+  // Update profile stats periodically
+  updateProfileStats();
+  setInterval(updateProfileStats, 60000); // Update every minute
+}
+
+function createDefaultProfile() {
+  return {
+    name: 'Music Lover',
+    avatar: null,
+    stats: {
+      totalSongsPlayed: 0,
+      totalPlayTime: 0, // in seconds
+      favoriteGenres: [],
+      favoriteArtists: [],
+      playlistsCreated: 0,
+      lastActive: new Date().toISOString()
+    },
+    preferences: {
+      defaultVolume: 70,
+      crossfadeEnabled: true,
+      eqPreset: 'flat',
+      theme: 'midnight',
+      language: 'all'
+    },
+    achievements: []
+  };
+}
+
+function updateProfileStats() {
+  if (!state.userProfile) return;
+
+  // Update play time
+  if (state.currentSong && state.isPlaying) {
+    const now = Date.now();
+    const playTime = Math.floor((now - (state.playStartTime || now)) / 1000);
+    state.userProfile.stats.totalPlayTime += playTime;
+    state.playStartTime = now;
+  }
+
+  // Update favorite artists based on play history
+  if (state.playHistory && state.playHistory.length > 0) {
+    const artistCounts = {};
+    state.playHistory.forEach(track => {
+      const artist = track.artist || 'Unknown';
+      artistCounts[artist] = (artistCounts[artist] || 0) + 1;
+    });
+
+    const sortedArtists = Object.entries(artistCounts)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 5)
+      .map(([artist]) => artist);
+
+    state.userProfile.stats.favoriteArtists = sortedArtists;
+  }
+
+  // Update favorite genres (simplified - would need genre detection)
+  state.userProfile.stats.favoriteGenres = ['Pop', 'Rock', 'Electronic']; // Mock data
+
+  // Update last active
+  state.userProfile.stats.lastActive = new Date().toISOString();
+
+  // Save profile
+  localStorage.setItem('raagam_user_profile', JSON.stringify(state.userProfile));
+}
+
+function openUserProfileDialog() {
+  const dialog = $('#user-profile-dialog');
+  if (!dialog) {
+    // Create dialog if it doesn't exist
+    createUserProfileDialog();
+    return;
+  }
+
+  // Populate dialog with current profile data
+  populateUserProfileDialog();
+  dialog.classList.remove('hidden');
+}
+
+function createUserProfileDialog() {
+  const dialog = document.createElement('div');
+  dialog.id = 'user-profile-dialog';
+  dialog.className = 'dialog-overlay';
+  dialog.innerHTML = `
+    <div class="dialog-box" style="max-width: 500px;">
+      <div class="dialog-header">
+        <h2>User Profile</h2>
+        <button id="user-profile-close" class="dialog-close">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="dialog-content">
+        <div class="profile-header" style="text-align: center; margin-bottom: 24px;">
+          <div class="profile-avatar" style="width: 80px; height: 80px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+          </div>
+          <h3 id="profile-name" style="margin: 0 0 4px 0;">Music Lover</h3>
+          <p id="profile-last-active" style="margin: 0; font-size: 12px; color: var(--text-dim);">Last active: Just now</p>
+        </div>
+
+        <div class="profile-stats" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px;">
+          <div class="stat-card" style="background: var(--bg-card); padding: 16px; border-radius: 8px; text-align: center;">
+            <div id="stat-songs-played" style="font-size: 24px; font-weight: 700; color: var(--accent);">0</div>
+            <div style="font-size: 12px; color: var(--text-dim);">Songs Played</div>
+          </div>
+          <div class="stat-card" style="background: var(--bg-card); padding: 16px; border-radius: 8px; text-align: center;">
+            <div id="stat-play-time" style="font-size: 24px; font-weight: 700; color: var(--accent);">0h</div>
+            <div style="font-size: 12px; color: var(--text-dim);">Play Time</div>
+          </div>
+        </div>
+
+        <div class="profile-section" style="margin-bottom: 20px;">
+          <h4 style="margin: 0 0 12px 0;">Favorite Artists</h4>
+          <div id="favorite-artists" style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <!-- Favorite artists will be populated here -->
+          </div>
+        </div>
+
+        <div class="profile-section" style="margin-bottom: 20px;">
+          <h4 style="margin: 0 0 12px 0;">Favorite Genres</h4>
+          <div id="favorite-genres" style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <!-- Favorite genres will be populated here -->
+          </div>
+        </div>
+
+        <div class="profile-section">
+          <h4 style="margin: 0 0 12px 0;">Preferences</h4>
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <label style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Default Volume</span>
+              <input type="range" id="profile-default-volume" min="0" max="100" style="width: 100px;" />
+            </label>
+            <label style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Crossfade</span>
+              <input type="checkbox" id="profile-crossfade" style="width: 18px; height: 18px;" />
+            </label>
+            <label style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Theme</span>
+              <select id="profile-theme" style="padding: 4px 8px; border-radius: 4px; border: 1px solid var(--text-dim); background: var(--bg); color: var(--text-primary);">
+                <option value="midnight">Midnight</option>
+                <option value="abyss">Abyss</option>
+                <option value="sunset">Sunset</option>
+                <option value="forest">Forest</option>
+                <option value="rose">Rose</option>
+                <option value="ocean">Ocean</option>
+                <option value="snow">Snow</option>
+                <option value="aurora">Aurora</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--text-dim);">
+          <button id="reset-profile-btn" style="background: rgba(255,60,60,0.1); color: #ff5252; border: 1px solid rgba(255,60,60,0.3); border-radius: 8px; padding: 10px 16px; cursor: pointer; width: 100%;">
+            Reset Profile
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(dialog);
+
+  // Event listeners
+  $('#user-profile-close').addEventListener('click', () => dialog.classList.add('hidden'));
+  $('#profile-default-volume').addEventListener('input', (e) => {
+    state.userProfile.preferences.defaultVolume = parseInt(e.target.value);
+    saveUserProfile();
+  });
+  $('#profile-crossfade').addEventListener('change', (e) => {
+    state.userProfile.preferences.crossfadeEnabled = e.target.checked;
+    saveUserProfile();
+  });
+  $('#profile-theme').addEventListener('change', (e) => {
+    state.userProfile.preferences.theme = e.target.value;
+    saveUserProfile();
+  });
+  $('#reset-profile-btn').addEventListener('click', () => {
+    if (confirm('Are you sure you want to reset your profile? This will clear all stats and preferences.')) {
+      state.userProfile = createDefaultProfile();
+      saveUserProfile();
+      populateUserProfileDialog();
+      showToast('Profile reset successfully');
+    }
+  });
+
+  populateUserProfileDialog();
+  dialog.classList.remove('hidden');
+}
+
+function populateUserProfileDialog() {
+  const profile = state.userProfile;
+  if (!profile) return;
+
+  // Basic info
+  $('#profile-name').textContent = profile.name;
+  $('#profile-last-active').textContent = `Last active: ${new Date(profile.stats.lastActive).toLocaleDateString()}`;
+
+  // Stats
+  $('#stat-songs-played').textContent = profile.stats.totalSongsPlayed.toLocaleString();
+  const playTimeHours = Math.floor(profile.stats.totalPlayTime / 3600);
+  $('#stat-play-time').textContent = `${playTimeHours}h`;
+
+  // Favorite artists
+  const artistsContainer = $('#favorite-artists');
+  artistsContainer.innerHTML = '';
+  profile.stats.favoriteArtists.forEach(artist => {
+    const tag = document.createElement('span');
+    tag.style.cssText = 'background: var(--accent); color: #000; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 500;';
+    tag.textContent = artist;
+    artistsContainer.appendChild(tag);
+  });
+
+  // Favorite genres
+  const genresContainer = $('#favorite-genres');
+  genresContainer.innerHTML = '';
+  profile.stats.favoriteGenres.forEach(genre => {
+    const tag = document.createElement('span');
+    tag.style.cssText = 'background: var(--bg-card); color: var(--text-primary); padding: 4px 8px; border-radius: 12px; font-size: 12px; border: 1px solid var(--text-dim);';
+    tag.textContent = genre;
+    genresContainer.appendChild(tag);
+  });
+
+  // Preferences
+  $('#profile-default-volume').value = profile.preferences.defaultVolume;
+  $('#profile-crossfade').checked = profile.preferences.crossfadeEnabled;
+  $('#profile-theme').value = profile.preferences.theme;
+}
+
+function saveUserProfile() {
+  localStorage.setItem('raagam_user_profile', JSON.stringify(state.userProfile));
+}
+
+// Podcast functionality
+function initPodcasts() {
+  // Add podcast tab to search
+  const searchTabs = $('#search-tabs');
+  if (searchTabs) {
+    const podcastTab = document.createElement('button');
+    podcastTab.className = 'search-tab';
+    podcastTab.dataset.tab = 'podcasts';
+    podcastTab.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+      Podcasts
+    `;
+    searchTabs.appendChild(podcastTab);
+
+    podcastTab.addEventListener('click', () => {
+      $$('.search-tab').forEach(t => t.classList.remove('active'));
+      podcastTab.classList.add('active');
+      state.searchTab = 'podcasts';
+    });
+  }
+}
+
+// Mock podcast data (in a real app, this would come from an API)
+const mockPodcasts = [
+  {
+    id: 'podcast-1',
+    name: 'Music Discovery Weekly',
+    description: 'Weekly podcast exploring new music and artists',
+    host: 'Raagam Team',
+    episodes: [
+      {
+        id: 'ep-1',
+        title: 'Indie Rock Revival',
+        description: 'Exploring the latest indie rock bands making waves',
+        duration: '45:30',
+        published: '2024-01-15',
+        audioUrl: 'https://example.com/podcast1.mp3' // Mock URL
+      },
+      {
+        id: 'ep-2',
+        title: 'Jazz Legends',
+        description: 'A deep dive into jazz history and modern jazz artists',
+        duration: '52:15',
+        published: '2024-01-08',
+        audioUrl: 'https://example.com/podcast2.mp3' // Mock URL
+      }
+    ]
+  },
+  {
+    id: 'podcast-2',
+    name: 'Artist Interviews',
+    description: 'In-depth conversations with musicians and producers',
+    host: 'Music Insider',
+    episodes: [
+      {
+        id: 'ep-3',
+        title: 'Electronic Music Production',
+        description: 'How modern producers create electronic music',
+        duration: '38:45',
+        published: '2024-01-12',
+        audioUrl: 'https://example.com/podcast3.mp3' // Mock URL
+      }
+    ]
+  }
+];
+
+async function searchPodcasts(query) {
+  // In a real implementation, this would search a podcast API
+  // For now, return mock data filtered by query
+  if (!query) return mockPodcasts;
+
+  return mockPodcasts.filter(podcast =>
+    podcast.name.toLowerCase().includes(query.toLowerCase()) ||
+    podcast.description.toLowerCase().includes(query.toLowerCase()) ||
+    podcast.episodes.some(ep =>
+      ep.title.toLowerCase().includes(query.toLowerCase()) ||
+      ep.description.toLowerCase().includes(query.toLowerCase())
+    )
+  );
+}
+
+function renderPodcastItem(podcast) {
+  const div = document.createElement('div');
+  div.className = 'podcast-result-item';
+  div.innerHTML = `
+    <div class="podcast-result-art">
+      <div style="width: 60px; height: 60px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+      </div>
+    </div>
+    <div class="result-info">
+      <p class="result-title">${podcast.name}</p>
+      <p class="result-sub">${podcast.host} · ${podcast.episodes.length} episodes</p>
+      <p class="result-desc" style="font-size: 12px; color: var(--text-dim); margin-top: 4px; line-height: 1.4;">${podcast.description}</p>
+    </div>
+  `;
+
+  div.addEventListener('click', () => showPodcastDetail(podcast));
+  return div;
+}
+
+function renderPodcastEpisode(episode, podcast) {
+  const div = document.createElement('div');
+  div.className = 'episode-result-item';
+  div.innerHTML = `
+    <div class="episode-result-art">
+      <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 6px; display: flex; align-items: center; justify-content: center;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+    </div>
+    <div class="result-info">
+      <p class="result-title">${episode.title}</p>
+      <p class="result-sub">${episode.duration} · ${new Date(episode.published).toLocaleDateString()}</p>
+      <p class="result-desc" style="font-size: 12px; color: var(--text-dim); margin-top: 4px; line-height: 1.4;">${episode.description}</p>
+    </div>
+    <button class="episode-play-btn" data-episode-id="${episode.id}" style="background: var(--accent); color: #000; border: none; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: 600;">
+      Play
+    </button>
+  `;
+
+  const playBtn = div.querySelector('.episode-play-btn');
+  playBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    playPodcastEpisode(episode, podcast);
+  });
+
+  return div;
+}
+
+function showPodcastDetail(podcast) {
+  const resultsContainer = $('#search-results');
+
+  // Clear existing content
+  resultsContainer.innerHTML = '';
+
+  // Create podcast detail view
+  const detailView = document.createElement('div');
+  detailView.className = 'podcast-detail-view';
+  detailView.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding: 20px; background: var(--bg-card); border-radius: 12px;">
+      <div style="width: 120px; height: 120px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+      </div>
+      <div style="flex: 1;">
+        <h2 style="margin: 0 0 8px 0; font-size: 24px;">${podcast.name}</h2>
+        <p style="margin: 0 0 8px 0; color: var(--text-dim);">${podcast.host}</p>
+        <p style="margin: 0; font-size: 14px; line-height: 1.5;">${podcast.description}</p>
+      </div>
+    </div>
+    <h3 style="margin-bottom: 16px;">Episodes</h3>
+    <div class="episodes-list">
+      ${podcast.episodes.map(ep => renderPodcastEpisode(ep, podcast).outerHTML).join('')}
+    </div>
+  `;
+
+  resultsContainer.appendChild(detailView);
+}
+
+function playPodcastEpisode(episode, podcast) {
+  // Create a mock track object for podcast episode
+  const podcastTrack = {
+    id: episode.id,
+    name: episode.title,
+    artist: podcast.name,
+    album: podcast.name,
+    duration: episode.duration,
+    image: [], // No image for podcasts
+    downloadUrl: episode.audioUrl,
+    isPodcast: true,
+    podcastInfo: {
+      podcast: podcast.name,
+      host: podcast.host,
+      description: episode.description,
+      published: episode.published
+    }
+  };
+
+  // Play the podcast episode
+  playSong(podcastTrack);
+  showToast(`Playing: ${episode.title}`);
+}
+
+// Parental controls functionality
+function initParentalControls() {
+  // Load saved parental controls setting
+  state.parentalControls = localStorage.getItem('raagam_parental_controls') === 'true';
+}
+
+function toggleParentalControls(enabled) {
+  state.parentalControls = enabled;
+  localStorage.setItem('raagam_parental_controls', enabled.toString());
+
+  if (enabled) {
+    showToast('Parental controls enabled - explicit content will be filtered');
+  } else {
+    showToast('Parental controls disabled');
+  }
+}
+
+function isContentAllowed(track) {
+  if (!state.parentalControls) return true;
+
+  // Check for explicit content indicators
+  const title = (track.name || '').toLowerCase();
+  const artist = (track.artist || '').toLowerCase();
+  const album = (track.album || '').toLowerCase();
+
+  // Common explicit content keywords
+  const explicitKeywords = [
+    'explicit', 'clean', 'censored', 'radio edit',
+    'fuck', 'shit', 'damn', 'bitch', 'ass', 'dick', 'pussy',
+    'nigga', 'nigger', 'cunt', 'cock', 'tits', 'boobs',
+    'sex', 'porn', 'cum', 'jizz', 'whore', 'slut'
+  ];
+
+  const content = `${title} ${artist} ${album}`;
+
+  // Check if any explicit keywords are present
+  return !explicitKeywords.some(keyword => content.includes(keyword));
+}
+
+function filterSearchResults(results) {
+  if (!state.parentalControls) return results;
+
+  return results.filter(track => isContentAllowed(track));
+}
+
+function openParentalControlsDialog() {
+  const dialog = $('#parental-controls-dialog');
+  if (!dialog) {
+    // Create dialog if it doesn't exist
+    createParentalControlsDialog();
+    return;
+  }
+
+  // Update dialog state
+  const toggle = $('#parental-controls-toggle');
+  if (toggle) toggle.checked = state.parentalControls;
+
+  dialog.classList.remove('hidden');
+}
+
+function createParentalControlsDialog() {
+  const dialog = document.createElement('div');
+  dialog.id = 'parental-controls-dialog';
+  dialog.className = 'dialog-overlay';
+  dialog.innerHTML = `
+    <div class="dialog-box" style="max-width: 400px;">
+      <div class="dialog-header">
+        <h2>Parental Controls</h2>
+        <button id="parental-controls-close" class="dialog-close">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="dialog-content">
+        <div style="margin-bottom: 20px;">
+          <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 16px;">
+            <input type="checkbox" id="parental-controls-toggle" style="width: 20px; height: 20px;" />
+            <div>
+              <div style="font-weight: 600;">Enable Content Filtering</div>
+              <div style="font-size: 14px; color: var(--text-dim); margin-top: 4px;">
+                Filter out songs with explicit lyrics or content
+              </div>
+            </div>
+          </label>
+        </div>
+        <div style="background: var(--bg-card); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+          <h4 style="margin: 0 0 12px 0; color: var(--text-primary);">What gets filtered:</h4>
+          <ul style="margin: 0; padding-left: 20px; color: var(--text-dim); font-size: 14px; line-height: 1.5;">
+            <li>Songs with explicit language in titles</li>
+            <li>Artists known for explicit content</li>
+            <li>Albums marked as explicit</li>
+            <li>Content with profanity or adult themes</li>
+          </ul>
+        </div>
+        <div style="font-size: 12px; color: var(--text-dim); text-align: center;">
+          Note: This is a basic content filter. For comprehensive parental controls, consider additional monitoring tools.
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(dialog);
+
+  // Event listeners
+  $('#parental-controls-close').addEventListener('click', () => dialog.classList.add('hidden'));
+  $('#parental-controls-toggle').addEventListener('change', (e) => {
+    toggleParentalControls(e.target.checked);
+  });
+
+  dialog.classList.remove('hidden');
+}
+
+// Theme scheduling functionality
+let themeSchedulerInterval = null;
+
+function initThemeScheduler() {
+  // Load saved schedule
+  const saved = localStorage.getItem('raagam_theme_schedule');
+  if (saved) {
+    try {
+      state.themeSchedule = JSON.parse(saved);
+    } catch (e) {
+      state.themeSchedule = null;
+    }
+  }
+
+  // Start scheduler if enabled
+  if (state.themeSchedule?.enabled) {
+    startThemeScheduler();
+  }
+}
+
+function startThemeScheduler() {
+  if (themeSchedulerInterval) clearInterval(themeSchedulerInterval);
+
+  // Check every minute
+  themeSchedulerInterval = setInterval(() => {
+    checkThemeSchedule();
+  }, 60000);
+
+  // Check immediately
+  checkThemeSchedule();
+}
+
+function stopThemeScheduler() {
+  if (themeSchedulerInterval) {
+    clearInterval(themeSchedulerInterval);
+    themeSchedulerInterval = null;
+  }
+}
+
+function checkThemeSchedule() {
+  if (!state.themeSchedule?.enabled) return;
+
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  const currentTime = currentHour * 60 + currentMinute;
+
+  // Find the active schedule entry
+  let activeTheme = null;
+  for (const entry of state.themeSchedule.entries || []) {
+    const [hours, minutes] = entry.time.split(':').map(Number);
+    const entryTime = hours * 60 + minutes;
+
+    // Check if current time is within this schedule entry's range
+    if (currentTime >= entryTime) {
+      activeTheme = entry.theme;
+    } else {
+      break; // Schedule entries should be sorted by time
+    }
+  }
+
+  // If we found an active theme and it's different from current, apply it
+  if (activeTheme && activeTheme !== state.currentTheme) {
+    applyTheme(activeTheme);
+    showToast(`Theme changed to ${getThemeDisplayName(activeTheme)} (scheduled)`);
+  }
+}
+
+function saveThemeSchedule(schedule) {
+  state.themeSchedule = schedule;
+  localStorage.setItem('raagam_theme_schedule', JSON.stringify(schedule));
+
+  if (schedule?.enabled) {
+    startThemeScheduler();
+  } else {
+    stopThemeScheduler();
+  }
+}
+
+function getThemeDisplayName(theme) {
+  const names = {
+    'midnight': 'Midnight',
+    'abyss': 'Abyss',
+    'sunset': 'Sunset',
+    'forest': 'Forest',
+    'rose': 'Rose',
+    'ocean': 'Ocean',
+    'snow': 'Snow',
+    'aurora': 'Aurora',
+    'custom-backdrop': 'My Photo'
+  };
+  return names[theme] || theme;
+}
+
+function openThemeSchedulerDialog() {
+  const dialog = $('#theme-scheduler-dialog');
+  if (!dialog) {
+    // Create dialog if it doesn't exist
+    createThemeSchedulerDialog();
+    return;
+  }
+
+  // Populate existing schedule
+  populateThemeSchedulerDialog();
+  dialog.classList.remove('hidden');
+}
+
+function createThemeSchedulerDialog() {
+  const dialog = document.createElement('div');
+  dialog.id = 'theme-scheduler-dialog';
+  dialog.className = 'dialog-overlay';
+  dialog.innerHTML = `
+    <div class="dialog-box" style="max-width: 500px;">
+      <div class="dialog-header">
+        <h2>Theme Scheduler</h2>
+        <button id="theme-scheduler-close" class="dialog-close">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="dialog-content">
+        <div style="margin-bottom: 16px;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="theme-scheduler-enabled" style="width: 18px; height: 18px;" />
+            <span>Enable automatic theme changes</span>
+          </label>
+        </div>
+        <div id="theme-schedule-entries" style="margin-bottom: 16px;">
+          <!-- Schedule entries will be populated here -->
+        </div>
+        <button id="add-theme-schedule-entry" style="background: var(--accent); color: #000; border: none; padding: 10px 16px; border-radius: 8px; cursor: pointer; width: 100%;">
+          Add Schedule Entry
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(dialog);
+
+  // Event listeners
+  $('#theme-scheduler-close').addEventListener('click', () => dialog.classList.add('hidden'));
+  $('#theme-scheduler-enabled').addEventListener('change', (e) => {
+    const enabled = e.target.checked;
+    if (state.themeSchedule) {
+      state.themeSchedule.enabled = enabled;
+    } else {
+      state.themeSchedule = { enabled, entries: [] };
+    }
+    saveThemeSchedule(state.themeSchedule);
+  });
+  $('#add-theme-schedule-entry').addEventListener('click', addThemeScheduleEntry);
+
+  populateThemeSchedulerDialog();
+  dialog.classList.remove('hidden');
+}
+
+function populateThemeSchedulerDialog() {
+  const enabledCheckbox = $('#theme-scheduler-enabled');
+  const entriesContainer = $('#theme-schedule-entries');
+
+  if (enabledCheckbox) {
+    enabledCheckbox.checked = state.themeSchedule?.enabled || false;
+  }
+
+  if (entriesContainer) {
+    entriesContainer.innerHTML = '';
+
+    const entries = state.themeSchedule?.entries || [];
+    entries.sort((a, b) => a.time.localeCompare(b.time));
+
+    entries.forEach((entry, index) => {
+      const entryDiv = document.createElement('div');
+      entryDiv.className = 'theme-schedule-entry';
+      entryDiv.style.cssText = 'display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-card); border-radius: 8px; margin-bottom: 8px;';
+      entryDiv.innerHTML = `
+        <input type="time" value="${entry.time}" style="flex: 1; padding: 6px; border-radius: 4px; border: 1px solid var(--text-dim);" />
+        <select style="flex: 2; padding: 6px; border-radius: 4px; border: 1px solid var(--text-dim); background: var(--bg); color: var(--text-primary);">
+          <option value="midnight" ${entry.theme === 'midnight' ? 'selected' : ''}>Midnight</option>
+          <option value="abyss" ${entry.theme === 'abyss' ? 'selected' : ''}>Abyss</option>
+          <option value="sunset" ${entry.theme === 'sunset' ? 'selected' : ''}>Sunset</option>
+          <option value="forest" ${entry.theme === 'forest' ? 'selected' : ''}>Forest</option>
+          <option value="rose" ${entry.theme === 'rose' ? 'selected' : ''}>Rose</option>
+          <option value="ocean" ${entry.theme === 'ocean' ? 'selected' : ''}>Ocean</option>
+          <option value="snow" ${entry.theme === 'snow' ? 'selected' : ''}>Snow</option>
+          <option value="aurora" ${entry.theme === 'aurora' ? 'selected' : ''}>Aurora</option>
+          <option value="custom-backdrop" ${entry.theme === 'custom-backdrop' ? 'selected' : ''}>My Photo</option>
+        </select>
+        <button class="remove-schedule-entry" style="background: #ff4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">Remove</button>
+      `;
+
+      const timeInput = entryDiv.querySelector('input[type="time"]');
+      const themeSelect = entryDiv.querySelector('select');
+      const removeBtn = entryDiv.querySelector('.remove-schedule-entry');
+
+      timeInput.addEventListener('change', () => {
+        entry.time = timeInput.value;
+        saveThemeSchedule(state.themeSchedule);
+      });
+
+      themeSelect.addEventListener('change', () => {
+        entry.theme = themeSelect.value;
+        saveThemeSchedule(state.themeSchedule);
+      });
+
+      removeBtn.addEventListener('click', () => {
+        state.themeSchedule.entries.splice(index, 1);
+        saveThemeSchedule(state.themeSchedule);
+        populateThemeSchedulerDialog();
+      });
+
+      entriesContainer.appendChild(entryDiv);
+    });
+  }
+}
+
+function addThemeScheduleEntry() {
+  if (!state.themeSchedule) {
+    state.themeSchedule = { enabled: false, entries: [] };
+  }
+
+  // Add a new entry with default time and theme
+  const now = new Date();
+  const defaultTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  state.themeSchedule.entries.push({
+    time: defaultTime,
+    theme: 'midnight'
+  });
+
+  saveThemeSchedule(state.themeSchedule);
+  populateThemeSchedulerDialog();
+}
+
+// Voice search functionality
+let voiceRecognition = null;
+let isListening = false;
+
+function initVoiceSearch() {
+  // Check if Web Speech API is supported
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    console.warn('Voice search not supported in this browser');
+    return false;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  voiceRecognition = new SpeechRecognition();
+
+  voiceRecognition.continuous = false;
+  voiceRecognition.interimResults = false;
+  voiceRecognition.lang = 'en-US'; // Default to English, could be made configurable
+
+  voiceRecognition.onstart = () => {
+    isListening = true;
+    updateVoiceSearchUI();
+    showToast('🎤 Listening... Say a song or artist name');
+  };
+
+  voiceRecognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    console.log('Voice search transcript:', transcript);
+
+    // Stop listening
+    stopVoiceSearch();
+
+    // Process the voice input
+    processVoiceInput(transcript);
+  };
+
+  voiceRecognition.onerror = (event) => {
+    console.error('Voice search error:', event.error);
+    stopVoiceSearch();
+    showToast('Voice search failed. Try again.');
+  };
+
+  voiceRecognition.onend = () => {
+    isListening = false;
+    updateVoiceSearchUI();
+  };
+
+  return true;
+}
+
+function startVoiceSearch() {
+  if (!voiceRecognition) {
+    if (!initVoiceSearch()) {
+      showToast('Voice search not supported in this browser');
+      return;
+    }
+  }
+
+  if (isListening) {
+    stopVoiceSearch();
+    return;
+  }
+
+  try {
+    voiceRecognition.start();
+  } catch (error) {
+    console.error('Failed to start voice recognition:', error);
+    showToast('Could not start voice search');
+  }
+}
+
+function stopVoiceSearch() {
+  if (voiceRecognition && isListening) {
+    voiceRecognition.stop();
+  }
+}
+
+function processVoiceInput(transcript) {
+  // Clean up the transcript
+  const query = transcript.trim().toLowerCase();
+
+  if (!query) {
+    showToast('No speech detected');
+    return;
+  }
+
+  console.log('Processing voice input:', query);
+  showToast(`🎵 Searching for: "${query}"`);
+
+  // Switch to search view
+  switchView('search');
+
+  // Set the search input
+  const searchInput = $('#search-input');
+  if (searchInput) {
+    searchInput.value = query;
+    $('#search-clear').classList.remove('hidden');
+    $('#browse-categories').classList.add('hidden');
+
+    // Trigger search
+    performSearch(query);
+  }
+
+  analytics.trackEvent('voice_search', { query, transcript });
+}
+
+function updateVoiceSearchUI() {
+  const voiceBtn = $('#voice-search-btn');
+  if (voiceBtn) {
+    voiceBtn.classList.toggle('listening', isListening);
+    voiceBtn.innerHTML = isListening ?
+      '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8" opacity="0.3"/><circle cx="12" cy="12" r="4" opacity="0.6"/><circle cx="12" cy="12" r="2"/></svg>' :
+      '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>';
+  }
+}
+
+// Initialize IndexedDB for offline storage
+async function initOfflineDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('RaagamOffline', 1);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      state.offlineDB = request.result;
+      resolve();
+    };
+
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('tracks')) {
+        const store = db.createObjectStore('tracks', { keyPath: 'id' });
+        store.createIndex('artist', 'artist', { unique: false });
+        store.createIndex('album', 'album', { unique: false });
+      }
+    };
+  });
+}
+
+// Check storage quota
+async function checkStorageQuota() {
+  if ('storage' in navigator && 'estimate' in navigator.storage) {
+    try {
+      const estimate = await navigator.storage.estimate();
+      state.offlineStorageQuota = estimate.quota - estimate.usage;
+      return estimate;
+    } catch (e) {
+      console.warn('Storage estimate failed:', e);
+    }
+  }
+  return null;
+}
+
+// Download track for offline playback
+async function downloadTrack(track) {
+  if (!track || state.offlineDownloading.has(track.id)) return;
+
+  const url = getAudioUrl(track);
+  if (!url) {
+    showToast('No audio URL available for download');
+    return;
+  }
+
+  state.offlineDownloading.add(track.id);
+  updateOfflineUI();
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const blob = await response.blob();
+    const size = blob.size;
+
+    // Check if we have enough storage
+    if (state.offlineStorageQuota && size > state.offlineStorageQuota) {
+      throw new Error('Not enough storage space');
+    }
+
+    // Store in IndexedDB
+    const db = state.offlineDB;
+    const transaction = db.transaction(['tracks'], 'readwrite');
+    const store = transaction.objectStore('tracks');
+
+    const offlineTrack = {
+      id: track.id,
+      name: getTrackName(track),
+      artist: getArtistName(track),
+      album: getAlbumName(track),
+      image: getImage(track, 'mid'),
+      duration: track.duration,
+      blob: blob,
+      downloadedAt: Date.now(),
+      size: size
+    };
+
+    await new Promise((resolve, reject) => {
+      const request = store.put(offlineTrack);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+
+    state.offlineTracks.add(track.id);
+    state.offlineStorageQuota -= size;
+    showToast(`Downloaded: ${getTrackName(track)}`);
+
+  } catch (error) {
+    console.error('Download failed:', error);
+    showToast(`Download failed: ${error.message}`);
+  } finally {
+    state.offlineDownloading.delete(track.id);
+    updateOfflineUI();
+  }
+}
+
+// Remove track from offline storage
+async function removeOfflineTrack(trackId) {
+  try {
+    const db = state.offlineDB;
+    const transaction = db.transaction(['tracks'], 'readwrite');
+    const store = transaction.objectStore('tracks');
+
+    // Get track to reclaim storage space
+    const track = await new Promise((resolve) => {
+      const request = store.get(trackId);
+      request.onsuccess = () => resolve(request.result);
+    });
+
+    if (track) {
+      state.offlineStorageQuota += track.size;
+    }
+
+    await new Promise((resolve, reject) => {
+      const request = store.delete(trackId);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+
+    state.offlineTracks.delete(trackId);
+    showToast('Removed from offline storage');
+    updateOfflineUI();
+
+  } catch (error) {
+    console.error('Remove failed:', error);
+    showToast('Failed to remove track');
+  }
+}
+
+// Get offline track data
+async function getOfflineTrack(trackId) {
+  if (!state.offlineDB || !state.offlineTracks.has(trackId)) return null;
+
+  try {
+    const db = state.offlineDB;
+    const transaction = db.transaction(['tracks'], 'readonly');
+    const store = transaction.objectStore('tracks');
+
+    return await new Promise((resolve) => {
+      const request = store.get(trackId);
+      request.onsuccess = () => resolve(request.result);
+    });
+  } catch (error) {
+    console.error('Get offline track failed:', error);
+    return null;
+  }
+}
+
+// Toggle offline mode
+function toggleOfflineMode() {
+  state.offlineMode = !state.offlineMode;
+  localStorage.setItem('raagam_offline_mode', state.offlineMode);
+
+  if (state.offlineMode) {
+    showToast('Offline mode enabled');
+  } else {
+    showToast('Offline mode disabled');
+  }
+
+  updateOfflineUI();
+}
+
+// Update offline UI elements
+function updateOfflineUI() {
+  const offlineBtn = $('#settings-offline-btn');
+  const offlineStatus = $('#offline-status');
+  const downloadCount = $('#offline-download-count');
+
+  if (offlineBtn) {
+    offlineBtn.classList.toggle('active', state.offlineMode);
+    offlineBtn.textContent = state.offlineMode ? 'Disable Offline' : 'Enable Offline';
+  }
+
+  if (offlineStatus) {
+    const online = navigator.onLine;
+    const hasOfflineTracks = state.offlineTracks.size > 0;
+    const downloading = state.offlineDownloading.size > 0;
+
+    let status = online ? '🟢 Online' : '🔴 Offline';
+    if (state.offlineMode) {
+      status += hasOfflineTracks ? ` • ${state.offlineTracks.size} offline tracks` : ' • No offline tracks';
+      if (downloading) status += ` • Downloading ${state.offlineDownloading.size}`;
+    }
+
+    offlineStatus.textContent = status;
+    offlineStatus.classList.toggle('offline-active', state.offlineMode);
+  }
+
+  if (downloadCount) {
+    downloadCount.textContent = state.offlineTracks.size;
+  }
+
+  // Update download buttons in result items
+  document.querySelectorAll('.result-item').forEach(item => {
+    const trackId = item.dataset.trackId;
+    if (trackId) {
+      const downloadBtn = item.querySelector('.download-btn');
+      if (downloadBtn) {
+        const isDownloaded = state.offlineTracks.has(trackId);
+        const isDownloading = state.offlineDownloading.has(trackId);
+
+        downloadBtn.classList.toggle('downloaded', isDownloaded);
+        downloadBtn.classList.toggle('downloading', isDownloading);
+        downloadBtn.innerHTML = isDownloading ? '⏳' : isDownloaded ? '✓' : '↓';
+        downloadBtn.title = isDownloading ? 'Downloading...' : isDownloaded ? 'Remove from offline' : 'Download for offline';
+      }
+    }
+  });
+}
+
+// Load offline tracks from IndexedDB
+async function loadOfflineTracks() {
+  if (!state.offlineDB) return;
+
+  try {
+    const db = state.offlineDB;
+    const transaction = db.transaction(['tracks'], 'readonly');
+    const store = transaction.objectStore('tracks');
+
+    const tracks = await new Promise((resolve) => {
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+    });
+
+    tracks.forEach(track => {
+      state.offlineTracks.add(track.id);
+    });
+
+    console.log(`Loaded ${tracks.length} offline tracks`);
+  } catch (error) {
+    console.error('Load offline tracks failed:', error);
+  }
+}
+
+// Process download queue
+async function processDownloadQueue() {
+  if (state.offlineDownloadQueue.length === 0) return;
+
+  const track = state.offlineDownloadQueue.shift();
+  await downloadTrack(track);
+
+  // Continue processing queue
+  setTimeout(processDownloadQueue, 1000);
+}
+
+// Add download button to result items
+function addDownloadButtonToResult(resultItem, track) {
+  if (!resultItem || !track) return;
+
+  resultItem.dataset.trackId = track.id;
+
+  // Check if download button already exists
+  let downloadBtn = resultItem.querySelector('.download-btn');
+  if (downloadBtn) return;
+
+  downloadBtn = document.createElement('button');
+  downloadBtn.className = 'download-btn icon-btn';
+  downloadBtn.style.cssText = 'padding:6px;margin-left:4px;';
+  downloadBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+
+    const isDownloaded = state.offlineTracks.has(track.id);
+    const isDownloading = state.offlineDownloading.has(track.id);
+
+    if (isDownloading) {
+      showToast('Already downloading...');
+      return;
+    }
+
+    if (isDownloaded) {
+      await removeOfflineTrack(track.id);
+    } else {
+      state.offlineDownloadQueue.push(track);
+      processDownloadQueue();
+    }
+  });
+
+  // Add to result actions
+  const actions = resultItem.querySelector('.result-actions');
+  if (actions) {
+    actions.insertBefore(downloadBtn, actions.firstChild);
+  }
+}
+
+// Override playSong to support offline tracks
+const originalPlaySong = playSong;
+playSong = async function(track, addToQueue = true) {
+  // Check if offline mode and track is downloaded
+  if (state.offlineMode && state.offlineTracks.has(track.id)) {
+    const offlineTrack = await getOfflineTrack(track.id);
+    if (offlineTrack) {
+      // Create blob URL for offline playback
+      const blobUrl = URL.createObjectURL(offlineTrack.blob);
+      track._offlineUrl = blobUrl; // Store for cleanup
+
+      // Temporarily override getAudioUrl for this track
+      const originalGetAudioUrl = getAudioUrl;
+      getAudioUrl = (t) => t.id === track.id ? blobUrl : originalGetAudioUrl(t);
+
+      // Play normally
+      await originalPlaySong(track, addToQueue);
+
+      // Restore original function
+      getAudioUrl = originalGetAudioUrl;
+
+      // Clean up blob URL when track ends
+      audio.addEventListener('ended', () => {
+        if (track._offlineUrl) {
+          URL.revokeObjectURL(track._offlineUrl);
+          delete track._offlineUrl;
+        }
+      }, { once: true });
+
+      return;
+    }
+  }
+
+  // Normal online playback
+  await originalPlaySong(track, addToQueue);
+};
+
 // Start the app
 document.addEventListener('DOMContentLoaded', () => {
   console.log('DOMContentLoaded fired');
@@ -6525,5 +7802,28 @@ document.addEventListener('DOMContentLoaded', () => {
   apiHealth.init();  // Initialize circuit breakers & health tracking
   analytics.init();  // Initialize analytics
   registerServiceWorker(); // Register Service Worker for alarm support
+
+  // Initialize offline mode
+  state.offlineMode = localStorage.getItem('raagam_offline_mode') === 'true';
+  initOfflineDB().then(() => {
+    loadOfflineTracks();
+    checkStorageQuota();
+  }).catch(err => console.warn('Offline DB init failed:', err));
+
+  // Initialize voice search
+  initVoiceSearch();
+
+  // Initialize theme scheduler
+  initThemeScheduler();
+
+  // Initialize parental controls
+  initParentalControls();
+
+  // Initialize podcasts
+  initPodcasts();
+
+  // Initialize user profiles
+  initUserProfiles();
+
   init();
 });
