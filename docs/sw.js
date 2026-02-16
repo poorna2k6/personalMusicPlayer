@@ -1,5 +1,5 @@
 // Raagam Service Worker — Alarm & Caching
-const CACHE_NAME = 'raagam-v3.3';
+const CACHE_NAME = 'raagam-v3.5';
 const STATIC_ASSETS = [
   './',
   './index.html',

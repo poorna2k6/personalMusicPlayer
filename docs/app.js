@@ -85,6 +85,9 @@ const state = {
   visualizerAnimFrame: null,
   // Smart Queue
   smartQueueEnabled: localStorage.getItem('raagam_smartQueue') !== 'false',
+  // Theme
+  currentTheme: localStorage.getItem('raagam_theme') || 'midnight',
+  backdropImage: localStorage.getItem('raagam_backdrop') || null,
   // DJ Mixer
   djActive: false,
   djDecks: [],
@@ -1034,11 +1037,30 @@ async function loadHome() {
     recentRow.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">Play some songs to see them here</p>';
   }
 
-  // Load sections
+  // Load sections — dynamic based on user's preferred language
+  const lang = CONFIG.preferredLanguage || 'hindi';
+  const langName = CONFIG.supportedLanguages[lang]?.name || 'Hindi';
+  const currentYear = new Date().getFullYear();
+
+  // Update section titles dynamically
+  const trendingTitle = $('#trending-title');
+  const languageTitle = $('#language-title');
+  const bollywoodTitle = $('#bollywood-title');
+  if (trendingTitle) trendingTitle.textContent = `Trending ${langName} Now`;
+  if (languageTitle) languageTitle.textContent = `Latest ${langName} Hits`;
+  if (bollywoodTitle) {
+    // If user's language IS hindi, show a different second section instead of duplicate
+    if (lang === 'hindi') {
+      bollywoodTitle.textContent = 'Bollywood Party Mix';
+    } else {
+      bollywoodTitle.textContent = 'Bollywood Vibes';
+    }
+  }
+
   const sections = [
-    { id: 'trending-row', query: 'trending telugu songs 2024' },
-    { id: 'telugu-row', query: 'telugu hit songs latest' },
-    { id: 'bollywood-row', query: 'bollywood top hits' },
+    { id: 'trending-row', query: `trending ${langName} songs ${currentYear}` },
+    { id: 'language-row', query: `new ${langName} songs ${currentYear} latest` },
+    { id: 'bollywood-row', query: lang === 'hindi' ? `bollywood party songs ${currentYear}` : `bollywood top hits ${currentYear}` },
     { id: 'chill-row', query: 'chill lofi relax' },
   ];
 
@@ -5671,12 +5693,155 @@ function switchView(view) {
   $('#main-content').scrollTop = 0;
 }
 
+// ===== Theme System =====
+function applyTheme(themeName, saveToStorage = true) {
+  const html = document.documentElement;
+  html.setAttribute('data-theme', themeName);
+  state.currentTheme = themeName;
+
+  // Handle backdrop visibility
+  const backdrop = $('#theme-backdrop');
+  if (backdrop) {
+    if (themeName === 'custom-backdrop' && state.backdropImage) {
+      backdrop.style.backgroundImage = `url(${state.backdropImage})`;
+      backdrop.classList.add('active');
+    } else {
+      backdrop.classList.remove('active');
+      backdrop.style.backgroundImage = '';
+    }
+  }
+
+  // Update meta theme-color for mobile browser chrome
+  const themeColors = {
+    midnight: '#121212', abyss: '#0a0e1a', sunset: '#1a0a1e',
+    forest: '#0a1a0f', rose: '#1a0a14', ocean: '#042f2e',
+    snow: '#f8fafc', aurora: '#0c0c1d', 'custom-backdrop': '#121212'
+  };
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) metaTheme.content = themeColors[themeName] || '#121212';
+
+  if (saveToStorage) {
+    localStorage.setItem('raagam_theme', themeName);
+  }
+
+  // Update theme picker active state
+  $$('.theme-swatch').forEach(s => s.classList.toggle('active', s.dataset.theme === themeName));
+
+  // Show/hide backdrop upload area
+  const uploadArea = $('#backdrop-upload');
+  if (uploadArea) {
+    uploadArea.classList.toggle('active', themeName === 'custom-backdrop');
+  }
+
+  console.log(`Theme applied: ${themeName}`);
+}
+
+function setupThemePicker() {
+  const picker = $('#theme-picker');
+  if (!picker) return;
+
+  picker.addEventListener('click', (e) => {
+    const swatch = e.target.closest('.theme-swatch');
+    if (!swatch) return;
+    const theme = swatch.dataset.theme;
+    applyTheme(theme);
+    showToast(`Theme: ${swatch.querySelector('.theme-swatch-name').textContent}`);
+  });
+
+  // Custom backdrop image upload
+  const uploadArea = $('#backdrop-upload');
+  const fileInput = $('#backdrop-file');
+  const preview = $('#backdrop-preview');
+  const removeBtn = $('#backdrop-remove');
+
+  if (uploadArea && fileInput) {
+    uploadArea.addEventListener('click', (e) => {
+      if (e.target === removeBtn || e.target.closest('.backdrop-remove-btn')) return;
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 10 * 1024 * 1024) {
+        showToast('Image too large. Max 10MB.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        // Compress to reasonable size for localStorage
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxDim = 1200;
+          let w = img.width, h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) { h = (h / w) * maxDim; w = maxDim; }
+            else { w = (w / h) * maxDim; h = maxDim; }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          const compressed = canvas.toDataURL('image/jpeg', 0.7);
+
+          state.backdropImage = compressed;
+          localStorage.setItem('raagam_backdrop', compressed);
+
+          // Update preview
+          if (preview) {
+            preview.src = compressed;
+            preview.classList.add('active');
+          }
+          if (removeBtn) removeBtn.classList.add('active');
+
+          // Apply immediately
+          if (state.currentTheme === 'custom-backdrop') {
+            applyTheme('custom-backdrop', false);
+          }
+          showToast('Backdrop image set!');
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (removeBtn) {
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.backdropImage = null;
+      localStorage.removeItem('raagam_backdrop');
+      if (preview) {
+        preview.src = '';
+        preview.classList.remove('active');
+      }
+      removeBtn.classList.remove('active');
+      const backdrop = $('#theme-backdrop');
+      if (backdrop) {
+        backdrop.classList.remove('active');
+        backdrop.style.backgroundImage = '';
+      }
+      showToast('Backdrop removed');
+    });
+  }
+
+  // Restore backdrop preview if exists
+  if (state.backdropImage && preview) {
+    preview.src = state.backdropImage;
+    preview.classList.add('active');
+    if (removeBtn) removeBtn.classList.add('active');
+  }
+}
+
 // ===== Settings =====
 function openSettings() {
   $('#settings-panel').classList.remove('hidden');
   $('#audio-quality').value = CONFIG.quality;
   $('#api-server').value = CONFIG.apiBase;
-  $('#preferred-language').value = CONFIG.preferredLanguage || 'all';
+  const prefLang = $('#preferred-language');
+  if (prefLang) prefLang.value = CONFIG.preferredLanguage || 'all';
+  const settingsLang = $('#settings-language');
+  if (settingsLang) settingsLang.value = CONFIG.preferredLanguage || 'hindi';
   updateHealthStatusUI();
   updateSleepTimerUI();
   // Update EQ and Speed labels in settings
@@ -5689,6 +5854,11 @@ function openSettings() {
   const smartQueueToggle = $('#smart-queue-toggle');
   if (smartQueueToggle) smartQueueToggle.checked = state.smartQueueEnabled;
   updateAlarmUI();
+
+  // Update theme picker active state
+  $$('.theme-swatch').forEach(s => s.classList.toggle('active', s.dataset.theme === state.currentTheme));
+  const uploadArea = $('#backdrop-upload');
+  if (uploadArea) uploadArea.classList.toggle('active', state.currentTheme === 'custom-backdrop');
 }
 
 function updateHealthStatusUI() {
@@ -5807,6 +5977,22 @@ function setupEvents() {
     localStorage.setItem('raagam_language', CONFIG.preferredLanguage);
     showToast(`Preferred language: ${CONFIG.supportedLanguages[e.target.value].name}`);
   });
+
+  // Settings: Language preference change — reload home with new language
+  const settingsLangEl = $('#settings-language');
+  if (settingsLangEl) {
+    settingsLangEl.addEventListener('change', (e) => {
+      const newLang = e.target.value;
+      CONFIG.preferredLanguage = newLang;
+      localStorage.setItem('raagam_language', newLang);
+      state.homeLoaded = false; // Force home reload
+      showToast(`Language changed to ${CONFIG.supportedLanguages[newLang]?.name || newLang}. Refreshing home...`);
+      // Also update the old language select if it exists
+      const prefLang = $('#preferred-language');
+      if (prefLang) prefLang.value = newLang;
+      setTimeout(() => loadHome(), 300);
+    });
+  }
 
   // Health check button
   const healthBtn = $('#health-check-btn');
@@ -6190,6 +6376,7 @@ function showProfileDialog() {
     e.preventDefault();
     const name = newForm.querySelector('#user-name').value.trim();
     const phone = newForm.querySelector('#user-phone').value.trim();
+    const lang = newForm.querySelector('#user-language')?.value || 'hindi';
 
     if (name) {
       CONFIG.userProfile = { name, phone };
@@ -6198,7 +6385,14 @@ function showProfileDialog() {
     }
     localStorage.setItem('raagam_profile', JSON.stringify(CONFIG.userProfile));
     state.userProfile = CONFIG.userProfile;
-    analytics.trackEvent('profile_created', { hasPhone: !!phone });
+
+    // Save language preference from profile
+    CONFIG.preferredLanguage = lang;
+    localStorage.setItem('raagam_language', lang);
+    localStorage.setItem('raagam_language_setup', 'true');
+    state.languageSetupComplete = true;
+
+    analytics.trackEvent('profile_created', { hasPhone: !!phone, language: lang });
 
     dialog.classList.add('hidden');
     init(); // Continue to next step
@@ -6210,6 +6404,15 @@ function showProfileDialog() {
     CONFIG.userProfile = { name: 'Music Lover', phone: '' };
     localStorage.setItem('raagam_profile', JSON.stringify(CONFIG.userProfile));
     state.userProfile = CONFIG.userProfile;
+
+    // Set default language to hindi if not already set
+    if (!CONFIG.preferredLanguage) {
+      CONFIG.preferredLanguage = 'hindi';
+      localStorage.setItem('raagam_language', 'hindi');
+      localStorage.setItem('raagam_language_setup', 'true');
+      state.languageSetupComplete = true;
+    }
+
     analytics.trackEvent('profile_skipped');
     init(); // Continue without profile
   });
@@ -6252,8 +6455,11 @@ function init() {
 
   // Check if language setup is needed
   if (!state.languageSetupComplete) {
-    CONFIG.preferredLanguage = 'english';
-    localStorage.setItem('raagam_language', 'english');
+    // Default to hindi if no language was set (e.g. old users upgrading)
+    if (!CONFIG.preferredLanguage) {
+      CONFIG.preferredLanguage = 'hindi';
+      localStorage.setItem('raagam_language', 'hindi');
+    }
     localStorage.setItem('raagam_language_setup', 'true');
     state.languageSetupComplete = true;
   }
@@ -6286,6 +6492,10 @@ function init() {
     // Restore alarm if active
     initAlarmOnLoad();
 
+    // Restore theme
+    applyTheme(state.currentTheme, false);
+    setupThemePicker();
+
     // Show feature tour for first-time users (after a short delay so UI loads)
     if (!localStorage.getItem('raagam_feature_tour_seen')) {
       setTimeout(() => showFeatureTour(), 1200);
@@ -6301,6 +6511,17 @@ function init() {
 // Start the app
 document.addEventListener('DOMContentLoaded', () => {
   console.log('DOMContentLoaded fired');
+  // Apply theme immediately to prevent flash
+  const savedTheme = localStorage.getItem('raagam_theme') || 'midnight';
+  document.documentElement.setAttribute('data-theme', savedTheme);
+  if (savedTheme === 'custom-backdrop') {
+    const img = localStorage.getItem('raagam_backdrop');
+    const bd = document.getElementById('theme-backdrop');
+    if (bd && img) {
+      bd.style.backgroundImage = `url(${img})`;
+      bd.classList.add('active');
+    }
+  }
   apiHealth.init();  // Initialize circuit breakers & health tracking
   analytics.init();  // Initialize analytics
   registerServiceWorker(); // Register Service Worker for alarm support
