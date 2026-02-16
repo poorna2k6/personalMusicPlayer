@@ -6579,16 +6579,20 @@ function init() {
 
 // User profile functionality
 function initUserProfiles() {
-  // Load saved user profile
-  const saved = localStorage.getItem('raagam_user_profile');
-  if (saved) {
-    try {
-      state.userProfile = JSON.parse(saved);
-    } catch (e) {
-      state.userProfile = createDefaultProfile();
-    }
+  // Load saved user profile (support legacy keys)
+  const savedPrimary = localStorage.getItem('raagam_profile');
+  const savedAlt = localStorage.getItem('raagam_user_profile');
+  let parsed = null;
+  if (savedPrimary) {
+    try { parsed = JSON.parse(savedPrimary); } catch (e) { parsed = null; }
+  }
+  if (!parsed && savedAlt) {
+    try { parsed = JSON.parse(savedAlt); } catch (e) { parsed = null; }
+  }
+  if (parsed) {
+    state.userProfile = parsed;
   } else {
-    state.userProfile = createDefaultProfile();
+    state.userProfile = null; // No profile: trigger onboarding dialog
   }
 
   // Update profile stats periodically
@@ -6652,8 +6656,14 @@ function updateProfileStats() {
   // Update last active
   state.userProfile.stats.lastActive = new Date().toISOString();
 
-  // Save profile
-  localStorage.setItem('raagam_user_profile', JSON.stringify(state.userProfile));
+  // Save profile (persist under both keys for compatibility)
+  try {
+    const toSave = JSON.stringify(state.userProfile);
+    localStorage.setItem('raagam_user_profile', toSave);
+    localStorage.setItem('raagam_profile', toSave);
+  } catch (e) {
+    console.warn('Failed to save user profile:', e);
+  }
 }
 
 function openUserProfileDialog() {
@@ -7826,4 +7836,27 @@ document.addEventListener('DOMContentLoaded', () => {
   initUserProfiles();
 
   init();
+
+  // Recovery: if app remains hidden after initialization and no dialog is visible, force-show the UI
+  setTimeout(() => {
+    try {
+      const appEl = $('#app');
+      const splashEl = $('#splash');
+      const profileDlg = $('#profile-dialog');
+      const langDlg = $('#language-dialog');
+      if (appEl && appEl.classList.contains('hidden') &&
+        (!profileDlg || profileDlg.classList.contains('hidden')) &&
+        (!langDlg || langDlg.classList.contains('hidden')) ) {
+        console.warn('UI recovery: forcing app to show because initialization did not complete.');
+        appEl.classList.remove('hidden');
+        if (splashEl) {
+          splashEl.style.opacity = '0';
+          setTimeout(() => splashEl.remove(), 400);
+        }
+        showToast('Recovered UI — if you still see issues clear site storage from Settings.');
+      }
+    } catch (e) {
+      console.warn('UI recovery check failed:', e);
+    }
+  }, 1500);
 });
