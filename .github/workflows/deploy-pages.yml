@@ -23,26 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm run install:all
-
-      - name: Save demo audio files before build
-        run: cp -r docs/audio /tmp/demo-audio
-
-      - name: Build frontend
-        run: cd frontend && npm run build
-        env:
-          VITE_DEMO_MODE: true
-
-      - name: Restore demo audio files
-        run: cp -r /tmp/demo-audio docs/audio
-
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
