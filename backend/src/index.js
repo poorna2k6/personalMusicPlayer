@@ -12,8 +12,67 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const MUSIC_LIBRARY_PATH = process.env.MUSIC_LIBRARY_PATH || path.join(__dirname, '../../music');
 
+// Simple in-memory rate limiter for analytics endpoints
+const rateLimitMap = new Map();
+function rateLimit(windowMs, maxRequests) {
+  return (req, res, next) => {
+    const key = req.ip || 'unknown';
+    const now = Date.now();
+    const windowStart = now - windowMs;
+
+    if (!rateLimitMap.has(key)) {
+      rateLimitMap.set(key, []);
+    }
+
+    const requests = rateLimitMap.get(key).filter(ts => ts > windowStart);
+    requests.push(now);
+    rateLimitMap.set(key, requests);
+
+    if (requests.length > maxRequests) {
+      return res.status(429).json({ error: 'Too many requests, please try again later.' });
+    }
+    next();
+  };
+}
+
+// Clean up rate limit map periodically to prevent memory leaks
+setInterval(() => {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  for (const [key, timestamps] of rateLimitMap.entries()) {
+    const filtered = timestamps.filter(ts => ts > cutoff);
+    if (filtered.length === 0) {
+      rateLimitMap.delete(key);
+    } else {
+      rateLimitMap.set(key, filtered);
+    }
+  }
+}, 5 * 60 * 1000);
+
+// Input validation helpers
+function validateDays(days, defaultVal = 30, max = 365) {
+  const n = parseInt(days);
+  if (isNaN(n) || n < 1) return defaultVal;
+  return Math.min(n, max);
+}
+
+function validateHours(hours, defaultVal = 24, max = 168) {
+  const n = parseInt(hours);
+  if (isNaN(n) || n < 1) return defaultVal;
+  return Math.min(n, max);
+}
+
+function validatePeriod(period) {
+  const allowed = ['day', 'week', 'month'];
+  return allowed.includes(period) ? period : 'week';
+}
+
+function validateFormat(format) {
+  const allowed = ['json', 'csv'];
+  return allowed.includes(format) ? format : 'json';
+}
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 // Serve album art and audio files
 app.use('/api/audio', express.static(MUSIC_LIBRARY_PATH));
@@ -22,14 +81,20 @@ app.use('/api/audio', express.static(MUSIC_LIBRARY_PATH));
 app.use('/api/tracks', tracksRouter);
 app.use('/api/playlists', playlistsRouter);
 
-// Analytics endpoint
-app.post('/api/analytics', (req, res) => {
+// Apply rate limiting to analytics write endpoint
+app.post('/api/analytics', rateLimit(60 * 1000, 30), (req, res) => {
   try {
     const { sessionId, events } = req.body;
     const clientIP = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
 
-    if (!sessionId || !Array.isArray(events)) {
-      return res.status(400).json({ error: 'Invalid analytics data' });
+    if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 128) {
+      return res.status(400).json({ error: 'Invalid sessionId' });
+    }
+    if (!Array.isArray(events)) {
+      return res.status(400).json({ error: 'Invalid analytics data: events must be an array' });
+    }
+    if (events.length > 100) {
+      return res.status(400).json({ error: 'Too many events in a single request (max 100)' });
     }
 
     const db = getDb();
@@ -160,9 +225,10 @@ app.get('/api/analytics/dashboard', (req, res) => {
 // Enhanced analytics endpoints
 app.get('/api/analytics/sessions/daily', (req, res) => {
   try {
-    const days = parseInt(req.query.days) || 30;
+    const days = validateDays(req.query.days);
     const db = getDb();
 
+    const cutoff = (Math.floor(Date.now() / 1000) - days * 86400) * 1000;
     const dailySessions = db.prepare(`
       SELECT
         DATE(start_time / 1000, 'unixepoch') as date,
@@ -170,10 +236,10 @@ app.get('/api/analytics/sessions/daily', (req, res) => {
         COUNT(DISTINCT ip_address) as unique_users,
         AVG(duration) as avg_duration
       FROM analytics_sessions
-      WHERE start_time > strftime('%s', 'now', '-${days} days') * 1000
+      WHERE start_time > ?
       GROUP BY DATE(start_time / 1000, 'unixepoch')
       ORDER BY date DESC
-    `).all();
+    `).all(cutoff);
 
     res.json({ dailySessions });
   } catch (err) {
@@ -184,19 +250,20 @@ app.get('/api/analytics/sessions/daily', (req, res) => {
 
 app.get('/api/analytics/events/timeline', (req, res) => {
   try {
-    const hours = parseInt(req.query.hours) || 24;
+    const hours = validateHours(req.query.hours);
     const db = getDb();
 
+    const cutoff = (Math.floor(Date.now() / 1000) - hours * 3600) * 1000;
     const timeline = db.prepare(`
       SELECT
         strftime('%Y-%m-%d %H:00:00', timestamp / 1000, 'unixepoch') as hour,
         event_type,
         COUNT(*) as count
       FROM analytics_events
-      WHERE timestamp > strftime('%s', 'now', '-${hours} hours') * 1000
+      WHERE timestamp > ?
       GROUP BY hour, event_type
       ORDER BY hour DESC, count DESC
-    `).all();
+    `).all(cutoff);
 
     res.json({ timeline, hours });
   } catch (err) {
@@ -252,9 +319,11 @@ app.get('/api/analytics/users/demographics', (req, res) => {
 
 app.get('/api/analytics/music/popularity', (req, res) => {
   try {
-    const period = req.query.period || 'week';
+    const period = validatePeriod(req.query.period);
     const days = period === 'week' ? 7 : period === 'month' ? 30 : 1;
     const db = getDb();
+
+    const cutoff = (Math.floor(Date.now() / 1000) - days * 86400) * 1000;
 
     // Most played tracks
     const popularTracks = db.prepare(`
@@ -267,11 +336,11 @@ app.get('/api/analytics/music/popularity', (req, res) => {
       FROM analytics_events
       WHERE event_type = 'music_action'
         AND JSON_EXTRACT(event_data, '$.action') = 'play'
-        AND timestamp > strftime('%s', 'now', '-${days} days') * 1000
+        AND timestamp > ?
       GROUP BY JSON_EXTRACT(event_data, '$.track.trackName'), JSON_EXTRACT(event_data, '$.track.artist')
       ORDER BY play_count DESC
       LIMIT 20
-    `).all();
+    `).all(cutoff);
 
     // Language preferences
     const languagePrefs = db.prepare(`
@@ -281,10 +350,10 @@ app.get('/api/analytics/music/popularity', (req, res) => {
       FROM analytics_events
       WHERE event_type = 'music_action'
         AND JSON_EXTRACT(event_data, '$.action') = 'play'
-        AND timestamp > strftime('%s', 'now', '-${days} days') * 1000
+        AND timestamp > ?
       GROUP BY JSON_EXTRACT(event_data, '$.track.language')
       ORDER BY play_count DESC
-    `).all();
+    `).all(cutoff);
 
     res.json({ popularTracks, languagePrefs, period });
   } catch (err) {
@@ -377,7 +446,7 @@ app.get('/api/analytics/performance/errors', (req, res) => {
 
 app.get('/api/analytics/export', (req, res) => {
   try {
-    const format = req.query.format || 'json';
+    const format = validateFormat(req.query.format);
     const db = getDb();
 
     // Export all analytics data
@@ -429,7 +498,8 @@ app.get('/api/analytics/export', (req, res) => {
 app.get('/api/analytics/admin/overview', (req, res) => {
   try {
     const db = getDb();
-    const days = parseInt(req.query.days) || 30;
+    const days = validateDays(req.query.days);
+    const cutoff = (Math.floor(Date.now() / 1000) - days * 86400) * 1000;
 
     // KPI summary
     const kpis = db.prepare(`
@@ -440,8 +510,8 @@ app.get('/api/analytics/admin/overview', (req, res) => {
         MAX(start_time) as last_session_time,
         MIN(start_time) as first_session_time
       FROM analytics_sessions
-      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
-    `).get();
+      WHERE start_time > ?
+    `).get(cutoff);
 
     // Today's stats
     const today = db.prepare(`
@@ -455,8 +525,8 @@ app.get('/api/analytics/admin/overview', (req, res) => {
     // Total events
     const eventCount = db.prepare(`
       SELECT COUNT(*) as total FROM analytics_events
-      WHERE timestamp > (strftime('%s','now') - ${days}*86400) * 1000
-    `).get();
+      WHERE timestamp > ?
+    `).get(cutoff);
 
     // Sessions per day (trend)
     const dailyTrend = db.prepare(`
@@ -466,9 +536,9 @@ app.get('/api/analytics/admin/overview', (req, res) => {
         COUNT(DISTINCT ip_address) as unique_users,
         ROUND(AVG(duration)/1000.0, 1) as avg_duration_sec
       FROM analytics_sessions
-      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+      WHERE start_time > ?
       GROUP BY date ORDER BY date
-    `).all();
+    `).all(cutoff);
 
     // Hourly heatmap (which hours are busiest)
     const hourlyHeatmap = db.prepare(`
@@ -476,17 +546,17 @@ app.get('/api/analytics/admin/overview', (req, res) => {
         CAST(strftime('%H', start_time/1000, 'unixepoch') AS INTEGER) as hour,
         COUNT(*) as sessions
       FROM analytics_sessions
-      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+      WHERE start_time > ?
       GROUP BY hour ORDER BY hour
-    `).all();
+    `).all(cutoff);
 
     // Event type breakdown
     const eventBreakdown = db.prepare(`
       SELECT event_type, COUNT(*) as count
       FROM analytics_events
-      WHERE timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+      WHERE timestamp > ?
       GROUP BY event_type ORDER BY count DESC
-    `).all();
+    `).all(cutoff);
 
     res.json({ kpis, today, eventCount, dailyTrend, hourlyHeatmap, eventBreakdown });
   } catch (err) {
@@ -499,7 +569,8 @@ app.get('/api/analytics/admin/overview', (req, res) => {
 app.get('/api/analytics/admin/devices', (req, res) => {
   try {
     const db = getDb();
-    const days = parseInt(req.query.days) || 30;
+    const days = validateDays(req.query.days);
+    const cutoff = (Math.floor(Date.now() / 1000) - days * 86400) * 1000;
 
     // Extract browser from session_start events
     const browsers = db.prepare(`
@@ -509,9 +580,9 @@ app.get('/api/analytics/admin/devices', (req, res) => {
         COUNT(*) as count
       FROM analytics_events
       WHERE event_type = 'session_start'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY browser ORDER BY count DESC
-    `).all();
+    `).all(cutoff);
 
     // OS breakdown
     const operatingSystems = db.prepare(`
@@ -521,9 +592,9 @@ app.get('/api/analytics/admin/devices', (req, res) => {
         COUNT(*) as count
       FROM analytics_events
       WHERE event_type = 'session_start'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY os ORDER BY count DESC
-    `).all();
+    `).all(cutoff);
 
     // Device types
     const deviceTypes = db.prepare(`
@@ -532,9 +603,9 @@ app.get('/api/analytics/admin/devices', (req, res) => {
         COUNT(*) as count
       FROM analytics_events
       WHERE event_type = 'session_start'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY device_type ORDER BY count DESC
-    `).all();
+    `).all(cutoff);
 
     // Device models
     const deviceModels = db.prepare(`
@@ -546,18 +617,18 @@ app.get('/api/analytics/admin/devices', (req, res) => {
       WHERE event_type = 'session_start'
         AND JSON_EXTRACT(event_data, '$.deviceModel') IS NOT NULL
         AND JSON_EXTRACT(event_data, '$.deviceModel') != ''
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY model ORDER BY count DESC LIMIT 20
-    `).all();
+    `).all(cutoff);
 
     // Screen sizes
     const screenSizes = db.prepare(`
       SELECT screen_size, COUNT(*) as count
       FROM analytics_sessions
-      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+      WHERE start_time > ?
         AND screen_size IS NOT NULL
       GROUP BY screen_size ORDER BY count DESC LIMIT 15
-    `).all();
+    `).all(cutoff);
 
     // Connection types
     const connections = db.prepare(`
@@ -566,9 +637,9 @@ app.get('/api/analytics/admin/devices', (req, res) => {
         COUNT(*) as count
       FROM analytics_events
       WHERE event_type = 'session_start'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY connection ORDER BY count DESC
-    `).all();
+    `).all(cutoff);
 
     res.json({ browsers, operatingSystems, deviceTypes, deviceModels, screenSizes, connections });
   } catch (err) {
@@ -581,24 +652,25 @@ app.get('/api/analytics/admin/devices', (req, res) => {
 app.get('/api/analytics/admin/audience', (req, res) => {
   try {
     const db = getDb();
-    const days = parseInt(req.query.days) || 30;
+    const days = validateDays(req.query.days);
+    const cutoff = (Math.floor(Date.now() / 1000) - days * 86400) * 1000;
 
     // Timezone distribution (proxy for geography)
     const timezones = db.prepare(`
       SELECT timezone, COUNT(*) as count
       FROM analytics_sessions
-      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+      WHERE start_time > ?
         AND timezone IS NOT NULL
       GROUP BY timezone ORDER BY count DESC
-    `).all();
+    `).all(cutoff);
 
     // Language
     const languages = db.prepare(`
       SELECT language, COUNT(*) as count
       FROM analytics_sessions
-      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+      WHERE start_time > ?
       GROUP BY language ORDER BY count DESC
-    `).all();
+    `).all(cutoff);
 
     // New vs returning
     const newVsReturning = db.prepare(`
@@ -607,9 +679,9 @@ app.get('/api/analytics/admin/audience', (req, res) => {
         COUNT(*) as count
       FROM analytics_events
       WHERE event_type = 'session_start'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY user_type
-    `).all();
+    `).all(cutoff);
 
     // Color scheme preference
     const colorScheme = db.prepare(`
@@ -618,9 +690,9 @@ app.get('/api/analytics/admin/audience', (req, res) => {
         COUNT(*) as count
       FROM analytics_events
       WHERE event_type = 'session_start'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY scheme
-    `).all();
+    `).all(cutoff);
 
     // Standalone (PWA) vs browser
     const installMode = db.prepare(`
@@ -629,9 +701,9 @@ app.get('/api/analytics/admin/audience', (req, res) => {
         COUNT(*) as count
       FROM analytics_events
       WHERE event_type = 'session_start'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY mode
-    `).all();
+    `).all(cutoff);
 
     res.json({ timezones, languages, newVsReturning, colorScheme, installMode });
   } catch (err) {
@@ -644,7 +716,8 @@ app.get('/api/analytics/admin/audience', (req, res) => {
 app.get('/api/analytics/admin/engagement', (req, res) => {
   try {
     const db = getDb();
-    const days = parseInt(req.query.days) || 30;
+    const days = validateDays(req.query.days);
+    const cutoff = (Math.floor(Date.now() / 1000) - days * 86400) * 1000;
 
     // Session duration distribution
     const durationBuckets = db.prepare(`
@@ -660,10 +733,10 @@ app.get('/api/analytics/admin/engagement', (req, res) => {
         END as bucket,
         COUNT(*) as count
       FROM analytics_sessions
-      WHERE start_time > (strftime('%s','now') - ${days}*86400) * 1000
+      WHERE start_time > ?
         AND duration IS NOT NULL
       GROUP BY bucket ORDER BY MIN(duration)
-    `).all();
+    `).all(cutoff);
 
     // Feature usage
     const featureUsage = db.prepare(`
@@ -672,9 +745,9 @@ app.get('/api/analytics/admin/engagement', (req, res) => {
         COUNT(*) as usage_count
       FROM analytics_events
       WHERE event_type = 'feature_usage'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY feature ORDER BY usage_count DESC
-    `).all();
+    `).all(cutoff);
 
     // Music actions breakdown
     const musicActions = db.prepare(`
@@ -683,9 +756,9 @@ app.get('/api/analytics/admin/engagement', (req, res) => {
         COUNT(*) as count
       FROM analytics_events
       WHERE event_type = 'music_action'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY action ORDER BY count DESC
-    `).all();
+    `).all(cutoff);
 
     // View navigation patterns
     const viewTransitions = db.prepare(`
@@ -695,9 +768,9 @@ app.get('/api/analytics/admin/engagement', (req, res) => {
         COUNT(*) as count
       FROM analytics_events
       WHERE event_type = 'navigation'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY from_view, to_view ORDER BY count DESC LIMIT 20
-    `).all();
+    `).all(cutoff);
 
     // Avg tracks per session
     const tracksPerSession = db.prepare(`
@@ -707,9 +780,9 @@ app.get('/api/analytics/admin/engagement', (req, res) => {
       FROM analytics_events e
       WHERE e.event_type = 'music_action'
         AND JSON_EXTRACT(e.event_data, '$.action') = 'play'
-        AND e.timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND e.timestamp > ?
       GROUP BY e.session_id
-    `).all();
+    `).all(cutoff);
     const avgTracksPerSession = tracksPerSession.length > 0
       ? (tracksPerSession.reduce((s,r) => s + r.tracks_played, 0) / tracksPerSession.length).toFixed(1)
       : 0;
@@ -725,7 +798,8 @@ app.get('/api/analytics/admin/engagement', (req, res) => {
 app.get('/api/analytics/admin/errors', (req, res) => {
   try {
     const db = getDb();
-    const days = parseInt(req.query.days) || 30;
+    const days = validateDays(req.query.days);
+    const cutoff = (Math.floor(Date.now() / 1000) - days * 86400) * 1000;
 
     const jsErrors = db.prepare(`
       SELECT
@@ -736,9 +810,9 @@ app.get('/api/analytics/admin/errors', (req, res) => {
         MAX(timestamp) as last_seen
       FROM analytics_events
       WHERE event_type = 'js_error'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY message ORDER BY count DESC LIMIT 20
-    `).all();
+    `).all(cutoff);
 
     const playbackErrors = db.prepare(`
       SELECT
@@ -748,9 +822,9 @@ app.get('/api/analytics/admin/errors', (req, res) => {
         MAX(timestamp) as last_seen
       FROM analytics_events
       WHERE event_type = 'playback_error'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY error ORDER BY count DESC LIMIT 20
-    `).all();
+    `).all(cutoff);
 
     const promiseErrors = db.prepare(`
       SELECT
@@ -759,9 +833,9 @@ app.get('/api/analytics/admin/errors', (req, res) => {
         MAX(timestamp) as last_seen
       FROM analytics_events
       WHERE event_type = 'promise_error'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY reason ORDER BY count DESC LIMIT 20
-    `).all();
+    `).all(cutoff);
 
     const connectivityIssues = db.prepare(`
       SELECT
@@ -769,9 +843,9 @@ app.get('/api/analytics/admin/errors', (req, res) => {
         COUNT(*) as count
       FROM analytics_events
       WHERE event_type = 'connectivity'
-        AND timestamp > (strftime('%s','now') - ${days}*86400) * 1000
+        AND timestamp > ?
       GROUP BY went_online
-    `).all();
+    `).all(cutoff);
 
     res.json({ jsErrors, playbackErrors, promiseErrors, connectivityIssues });
   } catch (err) {

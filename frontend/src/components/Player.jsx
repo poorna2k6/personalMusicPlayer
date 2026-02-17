@@ -1,8 +1,9 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { getAudioUrl, getCoverUrl } from '../api';
 
 export default function Player({ player }) {
   const audioRef = useRef(null);
+  const [playbackError, setPlaybackError] = useState(null);
   const {
     currentTrack, isPlaying, volume, currentTime, duration,
     shuffle, repeat,
@@ -16,17 +17,63 @@ export default function Player({ player }) {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
 
+    setPlaybackError(null);
     const src = getAudioUrl(currentTrack.file_path);
     if (audio.src !== new URL(src, window.location.origin).href) {
       audio.src = src;
     }
 
     if (isPlaying) {
-      audio.play().catch(() => {});
+      audio.play().catch((err) => {
+        if (err.name !== 'AbortError') {
+          setPlaybackError('Could not play this track. The file may be missing or unsupported.');
+          setIsPlaying(false);
+        }
+      });
     } else {
       audio.pause();
     }
   }, [currentTrack, isPlaying]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ignore when typing in an input/textarea
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          if (currentTrack) togglePlay();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          nextTrack();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          prevTrack();
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          setVolume(Math.min(1, volume + 0.1));
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          setVolume(Math.max(0, volume - 0.1));
+          break;
+        case 'm':
+        case 'M':
+          setVolume(volume > 0 ? 0 : 0.8);
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentTrack, togglePlay, nextTrack, prevTrack, setVolume, volume]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -42,12 +89,18 @@ export default function Player({ player }) {
   };
 
   const handleEnded = () => {
+    setPlaybackError(null);
     if (repeat === 'one') {
       audioRef.current.currentTime = 0;
-      audioRef.current.play();
+      audioRef.current.play().catch(() => {});
     } else {
       nextTrack();
     }
+  };
+
+  const handleError = () => {
+    setPlaybackError('Could not play this track. The file may be missing or unsupported.');
+    setIsPlaying(false);
   };
 
   const handleSeek = (e) => {
@@ -73,13 +126,24 @@ export default function Player({ player }) {
   }
 
   return (
-    <footer className="h-24 bg-surface-900 border-t border-surface-800 flex items-center px-4 gap-4">
+    <footer className="h-24 bg-surface-900 border-t border-surface-800 flex items-center px-4 gap-4 relative">
+      {playbackError && (
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full mb-1 px-3 py-1.5 rounded-lg bg-red-900/90 border border-red-700 text-red-200 text-xs whitespace-nowrap z-10">
+          {playbackError}
+          <button
+            onClick={() => setPlaybackError(null)}
+            className="ml-2 text-red-400 hover:text-red-200"
+          >
+            &times;
+          </button>
+        </div>
+      )}
       <audio
         ref={audioRef}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
-        onError={() => setIsPlaying(false)}
+        onError={handleError}
       />
 
       {/* Track info */}

@@ -20,6 +20,7 @@ function saveState(state) {
       shuffle: state.shuffle,
       repeat: state.repeat,
       smartAutoPlay: state.smartAutoPlay,
+      recentlyPlayed: state.recentlyPlayed,
     }));
   } catch {}
 }
@@ -38,13 +39,14 @@ export function usePlayerStore() {
   const [smartAutoPlay, setSmartAutoPlay] = useState(saved.current?.smartAutoPlay || false);
   const [allTracks, setAllTracks] = useState([]); // Store all available tracks for recommendations
   const [playedTracks, setPlayedTracks] = useState([]); // Track played songs for better recommendations
+  const [recentlyPlayed, setRecentlyPlayed] = useState(saved.current?.recentlyPlayed || []); // Persisted recently played list
 
   const currentTrack = queue[currentIndex] || null;
 
   // Persist state
   useEffect(() => {
-    saveState({ queue, currentIndex, volume, shuffle, repeat, smartAutoPlay });
-  }, [queue, currentIndex, volume, shuffle, repeat, smartAutoPlay]);
+    saveState({ queue, currentIndex, volume, shuffle, repeat, smartAutoPlay, recentlyPlayed });
+  }, [queue, currentIndex, volume, shuffle, repeat, smartAutoPlay, recentlyPlayed]);
 
   const playTrack = useCallback((track, trackList) => {
     if (trackList) {
@@ -53,6 +55,11 @@ export function usePlayerStore() {
       setCurrentIndex(idx >= 0 ? idx : 0);
     }
     setIsPlaying(true);
+    // Add to recently played (most recent first, deduplicated, max 20)
+    setRecentlyPlayed(prev => {
+      const filtered = prev.filter(t => t.id !== track.id);
+      return [{ ...track, playedAt: Date.now() }, ...filtered].slice(0, 20);
+    });
   }, []);
 
   const playAll = useCallback((tracks) => {
@@ -153,7 +160,7 @@ export function usePlayerStore() {
 
   return {
     queue, currentTrack, currentIndex, isPlaying, volume, currentTime, duration,
-    shuffle, repeat, smartAutoPlay,
+    shuffle, repeat, smartAutoPlay, recentlyPlayed,
     setVolume, setCurrentTime, setDuration, setIsPlaying,
     playTrack, playAll, togglePlay, nextTrack, prevTrack,
     toggleShuffle, toggleRepeat, addToQueue,

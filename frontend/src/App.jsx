@@ -6,6 +6,7 @@ import AlbumView from './components/AlbumView';
 import ArtistView from './components/ArtistView';
 import PlaylistView from './components/PlaylistView';
 import Player from './components/Player';
+import TrackRow from './components/TrackRow';
 import { fetchTracks, fetchArtists, fetchAlbums, fetchPlaylists, scanLibrary } from './api';
 
 export default function App() {
@@ -94,6 +95,8 @@ export default function App() {
         return (
           <AlbumList albums={albums} onSelect={(a) => navigate('album', a)} />
         );
+      case 'recent':
+        return <RecentlyPlayed tracks={player.recentlyPlayed} player={player} playlists={playlists} onUpdate={loadData} />;
       default:
         return <Library tracks={tracks} player={player} playlists={playlists} onUpdate={loadData} />;
     }
@@ -135,6 +138,7 @@ export default function App() {
           playlists={playlists}
           onSelectPlaylist={(p) => navigate('playlist', p)}
           onUpdate={loadData}
+          hasRecentlyPlayed={player.recentlyPlayed.length > 0}
         />
 
         {/* Main content */}
@@ -204,6 +208,66 @@ function AlbumList({ albums, onSelect }) {
       </div>
       {albums.length === 0 && (
         <p className="text-surface-400 text-center mt-12">No albums found. Scan your library to get started.</p>
+      )}
+    </div>
+  );
+}
+
+function RecentlyPlayed({ tracks, player, playlists, onUpdate }) {
+  const { playTrack, currentTrack, isPlaying } = player;
+
+  const formatRelativeTime = (ts) => {
+    const diff = Date.now() - ts;
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold">Recently Played</h2>
+        <span className="text-sm text-surface-400">{tracks.length} tracks</span>
+      </div>
+
+      {tracks.length > 0 ? (
+        <div className="space-y-0.5">
+          <div className="grid grid-cols-[2rem_1fr_1fr_1fr_6rem] gap-4 px-4 py-2 text-xs font-medium text-surface-400 uppercase tracking-wider border-b border-surface-800">
+            <span>#</span>
+            <span>Title</span>
+            <span>Artist</span>
+            <span>Album</span>
+            <span className="text-right">Played</span>
+          </div>
+          {tracks.map((track, i) => (
+            <div key={`${track.id}-${track.playedAt}`} className="relative">
+              <TrackRow
+                track={track}
+                index={i + 1}
+                isActive={currentTrack?.id === track.id}
+                isPlaying={currentTrack?.id === track.id && isPlaying}
+                onPlay={() => playTrack(track, tracks)}
+                playlists={playlists}
+                onUpdate={onUpdate}
+                player={player}
+              />
+              <span className="absolute right-12 top-1/2 -translate-y-1/2 text-xs text-surface-500 pointer-events-none">
+                {formatRelativeTime(track.playedAt)}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-20">
+          <svg className="w-16 h-16 mx-auto text-surface-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
+          </svg>
+          <h3 className="text-lg font-medium text-surface-300 mb-2">No history yet</h3>
+          <p className="text-surface-500">Tracks you play will appear here.</p>
+        </div>
       )}
     </div>
   );
