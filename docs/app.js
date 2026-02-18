@@ -4151,6 +4151,7 @@ const djMixer = {
     aud.addEventListener('ended', () => {
       deck.isPlaying = false;
       this.updateDeckPlayBtn(deck);
+      this._updateDeckPlayingUI(deck);
       // Auto-load next song if enabled for this deck
       const autoConf = state.djAutoLoadNext[deck.id];
       if (autoConf?.enabled) {
@@ -4837,18 +4838,18 @@ const djMixer = {
     try {
       const decks = state.djDecks;
       const playingDecks = decks.filter(d => d.isPlaying && d.track);
-      const emptyDecks   = decks.filter(d => !d.track);
+      // Decks with no track at all — fill them in background
+      const emptyDecks = decks.filter(d => !d.track && !d._loading);
 
-      // Auto-load any empty decks (don't await — do it in background)
+      // Auto-load any completely empty decks (non-blocking)
       emptyDecks.forEach(ed => {
-        if (!ed._loading) {
-          ed._loading = true;
-          this.autoLoadNextSong(ed).finally(() => { ed._loading = false; });
-        }
+        ed._loading = true;
+        this.autoLoadNextSong(ed).finally(() => { ed._loading = false; });
       });
 
       if (playingDecks.length === 0) {
-        const first = decks.find(d => d.track);
+        // Nothing playing — find any loaded (and not currently loading) deck and start it
+        const first = decks.find(d => d.track && !d._loading);
         if (first) this.playDeck(first.id);
         return;
       }
@@ -4861,24 +4862,30 @@ const djMixer = {
         if (remaining <= 12 && !deck.transitionTriggered) {
           deck.transitionTriggered = true;
 
-          // Find best next deck (loaded & not playing)
-          let nextDeck = decks.find(d => d.id !== deck.id && d.track && !d.isPlaying);
+          // Find best next deck: has a track, not playing, and NOT in the middle of loading
+          // (if _loading, the track is about to be replaced — don't start it yet)
+          let nextDeck = decks.find(d => d.id !== deck.id && d.track && !d.isPlaying && !d._loading);
+
           if (!nextDeck) {
-            // Find idle deck and load a song onto it
+            // No ready deck — find one that's idle (not playing, not loading) and trigger a load
             const idle = decks.find(d => d.id !== deck.id && !d.isPlaying && !d._loading);
             if (idle) {
+              // Fire load in background — DON'T await it (would block tick for 2-5s)
+              // On the next transition window tick, the deck will be ready
               idle._loading = true;
-              nextDeck = await this.autoLoadNextSong(idle).then(t => { idle._loading = false; return t ? idle : null; });
+              this.autoLoadNextSong(idle).finally(() => { idle._loading = false; });
             }
-          }
-          if (nextDeck && nextDeck.track && !nextDeck.isPlaying) {
+            // Can't transition this cycle — reset flag so we retry next second
+            deck.transitionTriggered = false;
+          } else {
+            // Ready deck found — start playing it and mix
             this.playDeck(nextDeck.id);
             this._performIntelligentTransition(deck, nextDeck);
             showToast(`Auto DJ: mixing → Deck ${nextDeck.idx + 1}`);
           }
         }
 
-        // ── Song ended: reset flag, eject, auto-load fresh song ──
+        // ── Song ended (or within last 0.5s): mark done and queue a fresh song ──
         if (remaining <= 0.5) {
           deck.transitionTriggered = false;
           deck.isPlaying = false;
