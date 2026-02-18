@@ -100,6 +100,7 @@ const state = {
   djAutoFillLang: localStorage.getItem('raagam_djAutoFillLang') || 'all',
   djAutoDJEnabled: false,
   djAutoDJInterval: null,
+  djSession: null,  // active DJ session: { pool, setlist, setlistIdx, config, poolFetchedAt }
   // { [deckId]: { enabled: bool, timer: number (seconds) } }
   djAutoLoadNext: {},
   // Offline Mode
@@ -979,6 +980,40 @@ const SMART_DJ_VIBES = {
   romantic: { label: 'Romantic',     icon: '💕', queries: ['romantic love songs', 'pyar heart touching', 'love ballad'] },
   winddown: { label: 'Wind Down',    icon: '🌙', queries: ['slow soothing night', 'soft lullaby peaceful', 'classical slow'] }
 };
+
+// ─── DJ SESSION: Energy Arcs & Pool Queries ───────────────────────────────────
+// Energy arc templates: arrays of target energy levels (0=chill, 1=med, 2=high, 3=peak)
+// Each position = one track in the setlist
+const ENERGY_ARCS = {
+  party:    [1, 1, 2, 2, 3, 3, 3, 2, 3, 3, 3, 3, 2, 3, 3, 3, 2, 2, 1, 1],
+  workout:  [2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 2, 3, 2, 2],
+  morning:  [0, 0, 1, 1, 1, 2, 1, 1, 0, 1, 1, 1, 2, 1, 1, 0, 1, 0, 0, 0],
+  focus:    [1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1],
+  chill:    [0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1],
+  romantic: [1, 1, 2, 1, 1, 2, 1, 2, 1, 1, 2, 1, 1, 2, 1, 2, 1, 1, 2, 1],
+  winddown: [2, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+  auto:     null  // generated from time of day
+};
+
+// Pool queries per vibe — 5 diverse queries each, fetched in parallel for ~100 songs
+const DJ_POOL_QUERIES = {
+  party:    ['party remix energetic', 'dance hits fast beat', 'dj songs club night', 'upbeat peppy trending', 'bhangra dance remix'],
+  workout:  ['gym workout power songs', 'high energy fast beat', 'running motivation songs', 'pump up remix', 'energetic exercise songs'],
+  morning:  ['morning fresh devotional', 'bhakti songs soft', 'classical peaceful morning', 'light acoustic fresh start', 'sunrise peaceful songs'],
+  focus:    ['instrumental concentration', 'acoustic study calm lofi', 'soft background focus', 'light instrumental work', 'calm ambient peaceful'],
+  chill:    ['chill lofi soft relax', 'mellow slow acoustic', 'easy listening soothing', 'soft night chill', 'peaceful slow mood'],
+  romantic: ['romantic love songs', 'pyar heart touching melody', 'love ballad duet', 'slow romantic night', 'emotional love songs'],
+  winddown: ['slow soothing night songs', 'lullaby soft sleep', 'peaceful bedtime classical', 'calm gentle night', 'slow melodious wind down'],
+  trending: ['trending songs 2025 latest', 'top hits popular', 'viral songs most played', 'new release hot', 'chartbuster hits']
+};
+
+// Energy level visual labels and colours used in arc strips
+const ENERGY_META = [
+  { label: 'Chill',  color: '#06b6d4', bg: 'rgba(6,182,212,0.15)'  },  // 0
+  { label: 'Medium', color: '#22c55e', bg: 'rgba(34,197,94,0.15)'  },  // 1
+  { label: 'High',   color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },  // 2
+  { label: 'Peak',   color: '#ef4444', bg: 'rgba(239,68,68,0.15)'  },  // 3
+];
 
 // Energy levels for progression-aware mixing (0=low → 3=peak)
 function getEnergyLevel(track) {
@@ -4777,17 +4812,346 @@ const djMixer = {
     return null;
   },
 
+  // ═══════════════════════════════════════════════════════════════
+  // DJ SESSION ENGINE — Trending Pool + Energy Arc + BPM-Aware Mixing
+  // ═══════════════════════════════════════════════════════════════
+
+  // Show the session setup dialog before Auto DJ starts
+  openDJSessionDialog() {
+    const modal = $('#dj-session-modal');
+    if (!modal) return;
+    // Pre-select user's preferred language
+    const prefLang = CONFIG.preferredLanguage || 'hindi';
+    modal.querySelectorAll('[data-lang]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.lang === prefLang);
+    });
+    // Pre-select auto vibe
+    modal.querySelectorAll('[data-vibe]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.vibe === 'auto');
+    });
+    // Pre-select 20-song duration
+    modal.querySelectorAll('[data-duration]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.duration === '20');
+    });
+    // Render arc preview for auto vibe
+    this._renderSessionArcPreview('auto', 20);
+    modal.classList.remove('hidden');
+  },
+
+  closeDJSessionDialog() {
+    $('#dj-session-modal')?.classList.add('hidden');
+  },
+
+  // Render the energy arc preview bars inside the session setup dialog
+  _renderSessionArcPreview(vibeKey, count) {
+    const container = $('#dj-session-arc-preview');
+    const desc = $('#dj-session-arc-desc');
+    if (!container) return;
+    const arc = this._getArcForVibe(vibeKey, count);
+    container.innerHTML = arc.map((e, i) => {
+      const m = ENERGY_META[e];
+      return `<div class="dj-arc-bar-preview" style="background:${m.color};height:${12 + e * 10}px" title="${m.label}"></div>`;
+    }).join('');
+    if (desc) {
+      const vibeLabel = SMART_DJ_VIBES[vibeKey]?.label || 'Auto';
+      const avgE = arc.reduce((s, e) => s + e, 0) / arc.length;
+      const arcShape = avgE >= 2.5 ? 'Sustained peak energy'
+        : avgE >= 1.8 ? 'Build-up to high energy'
+        : avgE >= 1.2 ? 'Balanced energy flow'
+        : 'Relaxed, low-energy flow';
+      desc.textContent = `${vibeLabel} · ${count === 0 ? 'Infinite' : count + ' tracks'} · ${arcShape}`;
+    }
+  },
+
+  // Build energy arc array for a vibe + desired length
+  _getArcForVibe(vibeKey, count) {
+    let base = ENERGY_ARCS[vibeKey];
+    if (!base) {
+      // Auto: derive from time of day
+      const h = new Date().getHours();
+      if      (h >= 5  && h < 9)  base = ENERGY_ARCS.morning;
+      else if (h >= 9  && h < 13) base = ENERGY_ARCS.focus;
+      else if (h >= 13 && h < 17) base = ENERGY_ARCS.party;
+      else if (h >= 17 && h < 21) base = ENERGY_ARCS.romantic;
+      else                         base = ENERGY_ARCS.winddown;
+    }
+    if (count === 0) return [...base]; // infinite — just use the template
+    // Extend or trim to requested count by repeating the arc pattern
+    const result = [];
+    for (let i = 0; i < count; i++) result.push(base[i % base.length]);
+    return result;
+  },
+
+  // Called when user clicks "Load & Start Session"
+  async startDJSession(cfg) {
+    // cfg = { lang, vibe, songCount }
+    this.closeDJSessionDialog();
+    state.djAutoDJEnabled = true;
+    $('#dj-autodj-toggle')?.classList.add('active');
+
+    // Show loading toast
+    showToast(`🎧 Loading ${cfg.songCount === 0 ? 'infinite' : cfg.songCount + '-track'} ${SMART_DJ_VIBES[cfg.vibe]?.label || ''} session...`);
+
+    // Build pool of trending songs
+    const pool = await this.buildDJPool(cfg.lang, cfg.vibe);
+    if (pool.length < 4) {
+      showToast('Could not load enough songs. Check connection.');
+      state.djAutoDJEnabled = false;
+      $('#dj-autodj-toggle')?.classList.remove('active');
+      return;
+    }
+
+    // Build the pre-planned setlist from pool + energy arc
+    const arc    = this._getArcForVibe(cfg.vibe, cfg.songCount || 20);
+    const setlist = this.buildDJSetlist(pool, arc);
+
+    // Save session state
+    state.djSession = {
+      config:       cfg,
+      pool:         pool,
+      setlist:      setlist,
+      setlistIdx:   0,
+      poolFetchedAt: Date.now(),
+      usedIds:      new Set()
+    };
+
+    // Eject existing deck tracks, load first 2 from setlist onto decks
+    state.djDecks.forEach(d => {
+      d.track = null; d.isPlaying = false; d.transitionTriggered = false; d._loading = false;
+      const el = document.getElementById(`dj-deck-${d.id}`);
+      if (el) { el.querySelector('.dj-deck-title').textContent = 'No track loaded'; el.querySelector('.dj-deck-artist').textContent = 'Loading...'; }
+    });
+
+    // Pre-load 2 decks (non-blocking)
+    const numDecks = Math.min(2, state.djDecks.length);
+    for (let i = 0; i < numDecks; i++) {
+      await this.getNextSetlistTrack(state.djDecks[i]);
+    }
+
+    // Show arc strip and start playback
+    this.updateArcUI();
+    this._beginAutoDJPlayback();
+  },
+
+  // Fetch a large pool of diverse trending songs for the session
+  async buildDJPool(lang, vibe) {
+    const langData = lang !== 'all' ? CONFIG.supportedLanguages[lang] : null;
+    const lk = langData?.keywords?.[0] || '';
+
+    // Combine vibe-specific queries with generic trending queries
+    const vibeQueries = (DJ_POOL_QUERIES[vibe] || DJ_POOL_QUERIES.trending).map(q => `${lk} ${q}`.trim());
+    const trendingQueries = DJ_POOL_QUERIES.trending.map(q => `${lk} ${q}`.trim());
+    const allQueries = [...new Set([...vibeQueries, ...trendingQueries])].slice(0, 8);
+
+    showToast(`Fetching trending ${langData?.name || 'music'}...`);
+
+    try {
+      const results = await Promise.allSettled(allQueries.map(q => apiSearch(q, 20)));
+      const all = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+
+      // Deduplicate by track ID
+      const seen = new Set();
+      const unique = all.filter(t => {
+        if (!t?.id || seen.has(t.id)) return false;
+        seen.add(t.id);
+        return true;
+      });
+
+      // Shuffle for variety (Fisher-Yates)
+      for (let i = unique.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [unique[i], unique[j]] = [unique[j], unique[i]];
+      }
+
+      console.log(`[DJ Pool] Built pool: ${unique.length} songs for ${lang}/${vibe}`);
+      return unique;
+    } catch (e) {
+      console.warn('[DJ Pool] buildDJPool failed:', e);
+      return [];
+    }
+  },
+
+  // Pre-assign songs from pool to energy arc positions
+  buildDJSetlist(pool, arc) {
+    const available = [...pool];
+    const setlist = [];
+    let prevTrack = null;
+
+    for (const targetEnergy of arc) {
+      // Filter candidates within ±1 energy of target
+      let candidates = available.filter(t => Math.abs(getEnergyLevel(t) - targetEnergy) <= 1);
+      // If not enough, relax to ±2
+      if (candidates.length < 3) candidates = available.filter(t => Math.abs(getEnergyLevel(t) - targetEnergy) <= 2);
+      // Last fallback: any track
+      if (candidates.length === 0) candidates = available.slice(0, 10);
+      if (candidates.length === 0) break;
+
+      // Score candidates by similarity to previous track
+      let best;
+      if (prevTrack) {
+        const scored = candidates.map(t => ({
+          ...t,
+          _score: calculateSimilarityScore(prevTrack, t, detectLanguage(prevTrack), detectGenre(prevTrack))
+                  + (getEnergyLevel(t) === targetEnergy ? 20 : 0)  // bonus for exact energy match
+        })).sort((a, b) => b._score - a._score);
+        best = scored[0];
+      } else {
+        best = candidates[Math.floor(Math.random() * Math.min(5, candidates.length))];
+      }
+
+      setlist.push({ energyTarget: targetEnergy, track: best });
+      // Remove from available pool to avoid repeats
+      const idx = available.findIndex(t => t.id === best.id);
+      if (idx >= 0) available.splice(idx, 1);
+      prevTrack = best;
+    }
+
+    console.log(`[DJ Setlist] Built ${setlist.length}-track setlist`);
+    return setlist;
+  },
+
+  // Get next track from the pre-planned setlist (with BPM correction)
+  async getNextSetlistTrack(deck) {
+    const session = state.djSession;
+    if (!session) return this.autoLoadNextSong(deck); // fallback
+
+    // Find next unloaded slot
+    const idx = session.setlistIdx;
+    if (idx >= session.setlist.length) {
+      // Setlist exhausted — refresh pool and extend if infinite session
+      if (session.config.songCount === 0) {
+        await this.refreshDJPool();
+        if (session.setlistIdx >= session.setlist.length) return null;
+      } else {
+        showToast('DJ Session complete!');
+        return null;
+      }
+    }
+
+    const slot = session.setlist[session.setlistIdx];
+    session.setlistIdx++;
+
+    if (!slot?.track) return null;
+
+    // BPM correction: if current deck has a BPM estimate and the pre-assigned track
+    // would be a jarring tempo jump (>30 BPM diff), swap with a better pool match
+    const currentBPM = state.djDecks.find(d => d.isPlaying)?.bpmEstimate;
+    let chosenTrack = slot.track;
+    if (currentBPM && session.pool.length > 10) {
+      const unusedPool = session.pool.filter(t => !session.usedIds.has(t.id));
+      const bpmCompatible = unusedPool.filter(t => {
+        if (!t._bpm) return true; // no BPM known, keep as candidate
+        return Math.abs(t._bpm - currentBPM) <= 20;
+      }).filter(t => Math.abs(getEnergyLevel(t) - slot.energyTarget) <= 1);
+      if (bpmCompatible.length > 0) {
+        // Score BPM-compatible candidates
+        const scored = bpmCompatible.map(t => ({
+          ...t,
+          _score: calculateSimilarityScore(slot.track, t, detectLanguage(slot.track), detectGenre(slot.track))
+        })).sort((a, b) => b._score - a._score);
+        chosenTrack = scored[0];
+      }
+    }
+
+    session.usedIds.add(chosenTrack.id);
+    // Store the deck's estimated BPM into the track for future use
+    if (currentBPM) chosenTrack._bpm = currentBPM;
+
+    this.loadTrack(deck.id, chosenTrack);
+    this.updateArcUI();
+
+    // If we're 60% through, refresh pool in background
+    if (session.setlistIdx >= Math.floor(session.setlist.length * 0.6) && !session._refreshing) {
+      session._refreshing = true;
+      this.refreshDJPool().finally(() => { if (session) session._refreshing = false; });
+    }
+
+    return chosenTrack;
+  },
+
+  // Extend the setlist with fresh trending songs (background, silent)
+  async refreshDJPool() {
+    const session = state.djSession;
+    if (!session) return;
+    const now = Date.now();
+    if (now - session.poolFetchedAt < 10 * 60 * 1000) return; // wait 10min between refreshes
+    console.log('[DJ Pool] Refreshing pool...');
+    const fresh = await this.buildDJPool(session.config.lang, session.config.vibe);
+    if (fresh.length < 5) return;
+    // Remove already-used tracks
+    const newTracks = fresh.filter(t => !session.usedIds.has(t.id));
+    // Extend setlist with new arc positions
+    const remainingArc = this._getArcForVibe(session.config.vibe, 20);
+    const extension = this.buildDJSetlist(newTracks, remainingArc);
+    session.setlist.push(...extension);
+    session.pool.push(...newTracks);
+    session.poolFetchedAt = now;
+    this.updateArcUI();
+    showToast(`DJ: +${extension.length} fresh trending tracks added`);
+  },
+
+  // Update the energy arc strip visualization in the DJ panel
+  updateArcUI() {
+    const strip = $('#dj-energy-arc-strip');
+    const barsRow = $('#dj-arc-bars-row');
+    const posLabel = $('#dj-arc-strip-pos');
+    const nextLabel = $('#dj-arc-next-label');
+    const session = state.djSession;
+
+    if (!session || !strip || !barsRow) return;
+    strip.classList.remove('hidden');
+
+    const { setlist, setlistIdx } = session;
+    const totalCount = session.config.songCount === 0 ? setlist.length : session.config.songCount;
+
+    // Position label
+    if (posLabel) posLabel.textContent = `Track ${Math.min(setlistIdx, setlist.length)} / ${totalCount === 0 ? '∞' : totalCount}`;
+
+    // Next energy label
+    const nextSlot = setlist[setlistIdx];
+    if (nextLabel && nextSlot) {
+      nextLabel.textContent = `Next: ${ENERGY_META[nextSlot.energyTarget]?.label || '?'}`;
+      nextLabel.style.color = ENERGY_META[nextSlot.energyTarget]?.color || '#fff';
+    }
+
+    // Render arc bars — show window of 30 around current position
+    const windowStart = Math.max(0, setlistIdx - 5);
+    const windowEnd   = Math.min(setlist.length, windowStart + 30);
+    const slice = setlist.slice(windowStart, windowEnd);
+
+    barsRow.innerHTML = slice.map((slot, i) => {
+      const absIdx = windowStart + i;
+      const e = slot.energyTarget;
+      const m = ENERGY_META[e];
+      const isPast    = absIdx < setlistIdx - 1;
+      const isCurrent = absIdx === setlistIdx - 1;
+      const isFuture  = absIdx >= setlistIdx;
+      const h = 10 + e * 10; // height 10-40px
+      const name = slot.track ? getTrackName(slot.track).slice(0, 12) : '...';
+      return `<div class="dj-arc-bar${isCurrent ? ' dj-arc-bar-current' : ''}${isPast ? ' dj-arc-bar-past' : ''}"
+        style="height:${h}px;background:${isPast ? '#333' : m.color};box-shadow:${isCurrent ? `0 0 8px ${m.color}` : 'none'}"
+        title="${name} (${m.label})">
+        ${isCurrent ? '<div class="dj-arc-bar-needle"></div>' : ''}
+      </div>`;
+    }).join('');
+
+    // Scroll current bar into view
+    const currentBar = barsRow.querySelector('.dj-arc-bar-current');
+    if (currentBar) currentBar.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+  },
+
   // === Full Auto DJ System ===
   // Automatically manages transitions, loads new songs, and keeps the music going
   toggleAutoDJ() {
-    state.djAutoDJEnabled = !state.djAutoDJEnabled;
-    const btn = $('#dj-autodj-toggle');
-    if (btn) btn.classList.toggle('active', state.djAutoDJEnabled);
     if (state.djAutoDJEnabled) {
-      this.startAutoDJ();
-    } else {
+      // Already running — stop
+      state.djAutoDJEnabled = false;
+      $('#dj-autodj-toggle')?.classList.remove('active');
       this.stopAutoDJ();
       showToast('Auto DJ OFF');
+    } else {
+      // Not running — show setup dialog first (ask user)
+      this.openDJSessionDialog();
     }
   },
 
@@ -4830,11 +5194,17 @@ const djMixer = {
       clearInterval(state.djAutoDJInterval);
       state.djAutoDJInterval = null;
     }
+    state.djSession = null;
+    $('#dj-energy-arc-strip')?.classList.add('hidden');
   },
 
   async _autoDJTick() {
     if (!state.djAutoDJEnabled || this._tickBusy) return;
     this._tickBusy = true;
+    // Choose loader: session setlist (with BPM correction) or classic intelligent search
+    const loadNext = (deck) => state.djSession
+      ? this.getNextSetlistTrack(deck)
+      : this.autoLoadNextSong(deck);
     try {
       const decks = state.djDecks;
       const playingDecks = decks.filter(d => d.isPlaying && d.track);
@@ -4844,7 +5214,7 @@ const djMixer = {
       // Auto-load any completely empty decks (non-blocking)
       emptyDecks.forEach(ed => {
         ed._loading = true;
-        this.autoLoadNextSong(ed).finally(() => { ed._loading = false; });
+        loadNext(ed).finally(() => { ed._loading = false; });
       });
 
       if (playingDecks.length === 0) {
@@ -4863,25 +5233,22 @@ const djMixer = {
           deck.transitionTriggered = true;
 
           // Find best next deck: has a track, not playing, and NOT in the middle of loading
-          // (if _loading, the track is about to be replaced — don't start it yet)
           let nextDeck = decks.find(d => d.id !== deck.id && d.track && !d.isPlaying && !d._loading);
 
           if (!nextDeck) {
-            // No ready deck — find one that's idle (not playing, not loading) and trigger a load
+            // No ready deck — fire a background load and retry next second
             const idle = decks.find(d => d.id !== deck.id && !d.isPlaying && !d._loading);
             if (idle) {
-              // Fire load in background — DON'T await it (would block tick for 2-5s)
-              // On the next transition window tick, the deck will be ready
               idle._loading = true;
-              this.autoLoadNextSong(idle).finally(() => { idle._loading = false; });
+              loadNext(idle).finally(() => { idle._loading = false; });
             }
-            // Can't transition this cycle — reset flag so we retry next second
             deck.transitionTriggered = false;
           } else {
             // Ready deck found — start playing it and mix
             this.playDeck(nextDeck.id);
             this._performIntelligentTransition(deck, nextDeck);
-            showToast(`Auto DJ: mixing → Deck ${nextDeck.idx + 1}`);
+            const trackName = nextDeck.track ? getTrackName(nextDeck.track).slice(0, 25) : `Deck ${nextDeck.idx + 1}`;
+            showToast(`Auto DJ: mixing → ${trackName}`);
           }
         }
 
@@ -4893,7 +5260,7 @@ const djMixer = {
           this._updateDeckPlayingUI(deck);
           if (!deck._loading) {
             deck._loading = true;
-            this.autoLoadNextSong(deck).finally(() => { deck._loading = false; });
+            loadNext(deck).finally(() => { deck._loading = false; });
           }
         }
       }
@@ -6999,6 +7366,59 @@ function setupEvents() {
   // DJ Auto DJ toggle
   const djAutoDJToggle = $('#dj-autodj-toggle');
   if (djAutoDJToggle) djAutoDJToggle.addEventListener('click', () => djMixer.toggleAutoDJ());
+
+  // ── DJ Session Setup Modal ──────────────────────────────────────────────────
+  // Close buttons
+  $('#dj-session-close')?.addEventListener('click', () => djMixer.closeDJSessionDialog());
+  $('#dj-session-backdrop')?.addEventListener('click', () => djMixer.closeDJSessionDialog());
+
+  // Language selection (single-select)
+  $('#dj-session-langs')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-lang]');
+    if (!btn) return;
+    $$('#dj-session-langs [data-lang]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    // Refresh arc preview with current vibe + updated lang context
+    const vibe = $('#dj-session-vibes [data-vibe].active')?.dataset.vibe || 'auto';
+    const count = parseInt($('#dj-session-durations [data-duration].active')?.dataset.duration || '20');
+    djMixer._renderSessionArcPreview(vibe, count);
+  });
+
+  // Vibe selection (single-select) — updates arc preview live
+  $('#dj-session-vibes')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-vibe]');
+    if (!btn) return;
+    $$('#dj-session-vibes [data-vibe]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const count = parseInt($('#dj-session-durations [data-duration].active')?.dataset.duration || '20');
+    djMixer._renderSessionArcPreview(btn.dataset.vibe, count);
+  });
+
+  // Duration selection (single-select) — updates arc preview
+  $('#dj-session-durations')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-duration]');
+    if (!btn) return;
+    $$('#dj-session-durations [data-duration]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const vibe = $('#dj-session-vibes [data-vibe].active')?.dataset.vibe || 'auto';
+    djMixer._renderSessionArcPreview(vibe, parseInt(btn.dataset.duration));
+  });
+
+  // Start Session button
+  $('#dj-session-start')?.addEventListener('click', () => {
+    const lang = $('#dj-session-langs [data-lang].active')?.dataset.lang || CONFIG.preferredLanguage || 'hindi';
+    const vibe = $('#dj-session-vibes [data-vibe].active')?.dataset.vibe || 'auto';
+    const songCount = parseInt($('#dj-session-durations [data-duration].active')?.dataset.duration || '20');
+    djMixer.startDJSession({ lang, vibe, songCount });
+  });
+
+  // Arc strip refresh button
+  $('#dj-arc-refresh')?.addEventListener('click', async () => {
+    if (!state.djSession) return;
+    state.djSession.poolFetchedAt = 0; // force refresh
+    showToast('Refreshing DJ pool with fresh trending songs...');
+    await djMixer.refreshDJPool();
+  });
 
   // DJ Help / Guide button
   const djHelpBtn = $('#dj-help-btn');

@@ -3340,3 +3340,153 @@ a { color: inherit; text-decoration: none; }
 }
 .sdj-stop:hover { background: rgba(255, 60, 60, 0.22); }
 .sdj-subhead { font-size: 12px; color: #b3b3b3; margin-top: 2px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   DJ SESSION SETUP MODAL
+   ═══════════════════════════════════════════════════════════════════ */
+.dj-session-modal {
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+}
+.dj-session-modal.hidden { display: none; }
+
+.dj-session-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+}
+
+.dj-session-panel {
+  position: relative; z-index: 1;
+  background: linear-gradient(160deg, #0d0d20 0%, #111128 100%);
+  border: 1px solid rgba(29, 185, 84, 0.25);
+  border-radius: 18px;
+  padding: 24px;
+  width: min(520px, 95vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.7), 0 0 40px rgba(29,185,84,0.08);
+}
+
+.dj-session-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 20px;
+}
+.dj-session-logo {
+  font-size: 18px; font-weight: 800; letter-spacing: 1px;
+  background: linear-gradient(135deg, #1DB954, #06b6d4);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.dj-session-close {
+  background: rgba(255,255,255,0.08); border: none; color: #ccc;
+  width: 30px; height: 30px; border-radius: 50%; cursor: pointer;
+  font-size: 14px; display: flex; align-items: center; justify-content: center;
+  transition: background 0.2s;
+}
+.dj-session-close:hover { background: rgba(255,255,255,0.18); color: #fff; }
+
+.dj-session-section { margin-bottom: 18px; }
+.dj-session-section-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  color: #888; margin-bottom: 10px; display: flex; align-items: baseline; gap: 8px;
+}
+.dj-sess-hint { font-size: 10px; color: #555; letter-spacing: 0; text-transform: none; font-weight: 400; }
+.dj-arc-legend { font-size: 10px; color: #666; letter-spacing: 0; text-transform: none; font-weight: 400; gap: 4px; }
+
+.dj-session-btn-grid {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.dj-sess-btn {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  color: #ccc; border-radius: 20px; padding: 7px 14px; font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s; white-space: nowrap;
+}
+.dj-sess-btn:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.25); color: #fff; }
+.dj-sess-btn.active {
+  background: rgba(29,185,84,0.18); border-color: #1DB954; color: #1DB954; font-weight: 700;
+  box-shadow: 0 0 10px rgba(29,185,84,0.2);
+}
+
+/* Arc preview bar chart in the session setup dialog */
+.dj-session-arc-preview {
+  display: flex; align-items: flex-end; gap: 3px; height: 52px;
+  background: rgba(0,0,0,0.3); border-radius: 8px; padding: 6px 8px;
+  overflow: hidden;
+}
+.dj-arc-bar-preview {
+  flex: 1; min-width: 4px; max-width: 18px;
+  border-radius: 3px 3px 0 0;
+  transition: height 0.3s ease, background 0.3s ease;
+  opacity: 0.9;
+}
+.dj-session-arc-desc {
+  font-size: 11px; color: #666; margin-top: 6px; text-align: center;
+}
+
+/* Session start CTA button */
+.dj-session-start-btn {
+  width: 100%; padding: 14px; margin-top: 6px;
+  background: linear-gradient(135deg, #1DB954 0%, #06b6d4 100%);
+  border: none; border-radius: 30px; color: #000; font-size: 15px;
+  font-weight: 800; letter-spacing: 0.5px; cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 4px 20px rgba(29,185,84,0.35);
+}
+.dj-session-start-btn:hover { transform: scale(1.02); box-shadow: 0 6px 28px rgba(29,185,84,0.5); }
+.dj-session-start-btn:active { transform: scale(0.98); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   DJ ENERGY ARC STRIP (shown in DJ panel during active session)
+   ═══════════════════════════════════════════════════════════════════ */
+.dj-energy-arc-strip {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(0,0,0,0.4); border-top: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 8px 16px; min-height: 60px;
+}
+.dj-energy-arc-strip.hidden { display: none; }
+
+.dj-arc-strip-left { flex-shrink: 0; min-width: 70px; }
+.dj-arc-strip-title {
+  font-size: 9px; font-weight: 800; letter-spacing: 2px; color: #1DB954; text-transform: uppercase;
+}
+.dj-arc-strip-pos { font-size: 10px; color: #666; margin-top: 2px; }
+
+.dj-arc-bars-scroll { flex: 1; overflow: hidden; }
+.dj-arc-bars-row {
+  display: flex; align-items: flex-end; gap: 3px; height: 44px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.dj-arc-bars-row::-webkit-scrollbar { display: none; }
+
+.dj-arc-bar {
+  flex-shrink: 0; width: 12px; min-width: 12px;
+  border-radius: 3px 3px 0 0;
+  position: relative; cursor: default;
+  transition: height 0.4s ease, background 0.3s;
+  opacity: 0.75;
+}
+.dj-arc-bar-current {
+  opacity: 1; transform: scaleX(1.2);
+  animation: arc-bar-pulse 1.5s ease-in-out infinite;
+}
+@keyframes arc-bar-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.dj-arc-bar-past { opacity: 0.3; }
+
+/* Needle marker on current bar */
+.dj-arc-bar-needle {
+  position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+  width: 2px; height: 6px; background: #fff; border-radius: 1px;
+}
+
+.dj-arc-strip-right { flex-shrink: 0; text-align: right; min-width: 70px; }
+.dj-arc-next-label { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px; }
+.dj-arc-refresh-btn {
+  font-size: 10px; padding: 3px 8px; border-radius: 10px;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+  color: #888; cursor: pointer; transition: all 0.2s;
+}
+.dj-arc-refresh-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }

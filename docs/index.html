@@ -837,6 +837,21 @@
       <button id="dj-add-deck" class="dj-btn dj-add-deck-btn">+ Add Deck</button>
     </div>
 
+    <!-- DJ Energy Arc Strip — shows pre-planned setlist arc while session is running -->
+    <div id="dj-energy-arc-strip" class="dj-energy-arc-strip hidden">
+      <div class="dj-arc-strip-left">
+        <div class="dj-arc-strip-title">SET ARC</div>
+        <div class="dj-arc-strip-pos" id="dj-arc-strip-pos">Track 1 / 20</div>
+      </div>
+      <div class="dj-arc-bars-scroll">
+        <div class="dj-arc-bars-row" id="dj-arc-bars-row"></div>
+      </div>
+      <div class="dj-arc-strip-right">
+        <div class="dj-arc-next-label" id="dj-arc-next-label">Next: Medium</div>
+        <button class="dj-btn dj-arc-refresh-btn" id="dj-arc-refresh" title="Refresh with fresh trending songs">↻ Refresh</button>
+      </div>
+    </div>
+
     <!-- DJ Crossfader -->
     <div class="dj-crossfader-section">
       <div class="dj-cf-assign">
@@ -875,6 +890,83 @@
   </div>
 
   <audio id="audio" preload="auto"></audio>
+  <!-- DJ Session Setup Modal — shown when user taps Auto DJ in the mixer -->
+  <div id="dj-session-modal" class="dj-session-modal hidden" role="dialog" aria-label="DJ Session Setup">
+    <div class="dj-session-backdrop" id="dj-session-backdrop"></div>
+    <div class="dj-session-panel">
+
+      <div class="dj-session-header">
+        <div class="dj-session-logo">🎧 DJ Session Setup</div>
+        <button class="dj-session-close" id="dj-session-close" aria-label="Close">✕</button>
+      </div>
+
+      <!-- Language -->
+      <div class="dj-session-section">
+        <div class="dj-session-section-title">Language
+          <span class="dj-sess-hint">Pre-selects your preferred language. Trending songs fetched for this language.</span>
+        </div>
+        <div class="dj-session-btn-grid" id="dj-session-langs">
+          <button class="dj-sess-btn" data-lang="hindi">🇮🇳 Hindi</button>
+          <button class="dj-sess-btn" data-lang="telugu">Telugu</button>
+          <button class="dj-sess-btn" data-lang="tamil">Tamil</button>
+          <button class="dj-sess-btn" data-lang="punjabi">Punjabi</button>
+          <button class="dj-sess-btn" data-lang="kannada">Kannada</button>
+          <button class="dj-sess-btn" data-lang="malayalam">Malayalam</button>
+          <button class="dj-sess-btn" data-lang="english">🌐 English</button>
+          <button class="dj-sess-btn" data-lang="all">🌍 All Mix</button>
+        </div>
+      </div>
+
+      <!-- Vibe -->
+      <div class="dj-session-section">
+        <div class="dj-session-section-title">Vibe
+          <span class="dj-sess-hint">Determines song mood and energy arc shape.</span>
+        </div>
+        <div class="dj-session-btn-grid" id="dj-session-vibes">
+          <button class="dj-sess-btn" data-vibe="auto">🕐 Auto</button>
+          <button class="dj-sess-btn" data-vibe="party">🎉 Party</button>
+          <button class="dj-sess-btn" data-vibe="workout">💪 Workout</button>
+          <button class="dj-sess-btn" data-vibe="chill">😎 Chill</button>
+          <button class="dj-sess-btn" data-vibe="romantic">💕 Romantic</button>
+          <button class="dj-sess-btn" data-vibe="morning">🌅 Morning</button>
+          <button class="dj-sess-btn" data-vibe="focus">🎯 Focus</button>
+          <button class="dj-sess-btn" data-vibe="winddown">🌙 Wind Down</button>
+        </div>
+      </div>
+
+      <!-- Duration -->
+      <div class="dj-session-section">
+        <div class="dj-session-section-title">Session Length</div>
+        <div class="dj-session-btn-grid" id="dj-session-durations">
+          <button class="dj-sess-btn" data-duration="10">Short · 10</button>
+          <button class="dj-sess-btn" data-duration="20">Standard · 20</button>
+          <button class="dj-sess-btn" data-duration="40">Long · 40</button>
+          <button class="dj-sess-btn" data-duration="0">∞ Infinite</button>
+        </div>
+      </div>
+
+      <!-- Energy Arc Preview -->
+      <div class="dj-session-section">
+        <div class="dj-session-section-title">Energy Arc
+          <span class="dj-arc-legend">
+            <span style="color:#06b6d4">■</span> Chill
+            <span style="color:#22c55e">■</span> Medium
+            <span style="color:#f59e0b">■</span> High
+            <span style="color:#ef4444">■</span> Peak
+          </span>
+        </div>
+        <div class="dj-session-arc-preview" id="dj-session-arc-preview"></div>
+        <div class="dj-session-arc-desc" id="dj-session-arc-desc">Select a vibe to see the energy arc</div>
+      </div>
+
+      <!-- Start Button -->
+      <button class="dj-session-start-btn" id="dj-session-start">
+        🎵 Load &amp; Start Session
+      </button>
+
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
