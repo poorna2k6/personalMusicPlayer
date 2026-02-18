@@ -3217,3 +3217,34 @@ a { color: inherit; text-decoration: none; }
 .episode-play-btn:hover {
   transform: scale(1.05);
 }
+
+/* ===== Smart DJ Picker ===== */
+.smart-dj-picker { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: flex-end; }
+.sdj-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.65); }
+.sdj-panel { position: relative; width: 100%; max-width: 480px; margin: 0 auto; background: #1a1a2e; border-radius: 24px 24px 0 0; padding: 24px 20px 36px; z-index: 1; }
+.sdj-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.sdj-header h3 { font-size: 17px; font-weight: 700; color: #fff; }
+.sdj-close { background: none; border: none; color: #b3b3b3; font-size: 20px; cursor: pointer; padding: 4px 8px; }
+.sdj-vibes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
+.sdj-vibe-btn { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.06); border: 1.5px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px 14px; color: #e0e0e0; font-size: 14px; cursor: pointer; transition: all 0.2s; text-align: left; }
+.sdj-vibe-btn:hover { background: rgba(29,185,84,0.12); border-color: rgba(29,185,84,0.4); }
+.sdj-vibe-btn.active { background: rgba(29,185,84,0.18); border-color: #1DB954; color: #fff; }
+.sdj-vibe-icon { font-size: 22px; }
+.sdj-start { width: 100%; padding: 14px; background: linear-gradient(135deg,#1DB954,#15803d); color: #000; font-weight: 700; font-size: 16px; border: none; border-radius: 50px; cursor: pointer; transition: opacity 0.2s; }
+.sdj-start:hover { opacity: 0.9; }
+#np-smartdj-btn.active { color: #1DB954; }
+#np-smartdj-btn.active svg { filter: drop-shadow(0 0 4px #1DB954); }
+
+/* ===== Daily Mixes ===== */
+.mix-row { gap: 14px; padding-bottom: 8px; }
+.mix-card { min-width: 140px; max-width: 140px; cursor: pointer; flex-shrink: 0; }
+.mix-card-art { position: relative; width: 140px; height: 140px; border-radius: 14px; overflow: hidden; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+.mix-card-icon { font-size: 48px; }
+.mix-play-btn { position: absolute; bottom: 8px; right: 8px; width: 36px; height: 36px; border-radius: 50%; background: rgba(0,0,0,0.6); color: #fff; border: none; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
+.mix-card:hover .mix-play-btn, .mix-card:active .mix-play-btn { opacity: 1; }
+.mix-card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mix-card-sub { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+
+/* ===== Feature Tour — New badges ===== */
+.ft-card-new { border-left: 3px solid #1DB954; }
+.ft-badge-new { display: inline-block; background: linear-gradient(135deg,#1DB954,#06b6d4); color: #000; font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 8px; vertical-align: middle; margin-left: 6px; letter-spacing: 0.5px; text-transform: uppercase; }

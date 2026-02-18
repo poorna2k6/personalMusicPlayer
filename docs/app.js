@@ -108,7 +108,20 @@ const state = {
   offlineDB: null, // IndexedDB instance
   offlineStorageQuota: null, // Available storage in bytes
   offlineDownloadQueue: [], // Queue of tracks to download
-  offlineDownloading: new Set() // Set of track IDs currently downloading
+  offlineDownloading: new Set(), // Set of track IDs currently downloading
+  // ── Priority Feature States ──────────────────────────────────────
+  // P1: Skip Signal Learning
+  skipSignals: JSON.parse(localStorage.getItem('raagam_skip_signals') || '{}'),
+  // P2/P3: Smart DJ + Vibe Arcs
+  smartDJEnabled: localStorage.getItem('raagam_smartdj') === 'true',
+  smartDJVibe: localStorage.getItem('raagam_smartdj_vibe') || 'auto',
+  smartDJBusy: false,
+  // P4: Gapless Playback
+  gaplessEnabled: localStorage.getItem('raagam_gapless') === 'true',
+  gaplessPreloaded: false,
+  gaplessPreloadUrl: null,
+  // P5: Volume Normalization
+  volumeNormEnabled: localStorage.getItem('raagam_volnorm') !== 'false'
 };
 
 // ===== Analytics & Tracking =====
@@ -918,7 +931,281 @@ function calculateSimilarityScore(track1, track2, currentLanguage, currentGenre)
     score += 5;
   }
 
+  // P1: Skip signal penalty — down-rank skipped artists/genres
+  const skipArtist = state.skipSignals[`artist:${getArtistName(track2)}`] || 0;
+  const skipGenre  = state.skipSignals[`genre:${detectGenre(track2)}`] || 0;
+  score -= skipArtist * 15;
+  score -= skipGenre  * 8;
+
   return score;
+}
+
+// ===== P1: Skip Signal Learning =====
+function recordSkipSignal(track) {
+  if (!track || !state.playStartTime) return;
+  const listenMs = Date.now() - state.playStartTime;
+  if (listenMs > 30000) return; // listened 30s+ = not a skip
+  const artistKey = `artist:${getArtistName(track)}`;
+  const genreKey  = `genre:${detectGenre(track)}`;
+  state.skipSignals[artistKey] = Math.min((state.skipSignals[artistKey] || 0) + 1, 10);
+  if (detectGenre(track) !== 'general') {
+    state.skipSignals[genreKey] = Math.min((state.skipSignals[genreKey] || 0) + 1, 10);
+  }
+  localStorage.setItem('raagam_skip_signals', JSON.stringify(state.skipSignals));
+}
+
+// ===== P6: Time-of-Day Context =====
+function getTimeOfDayContext() {
+  const h = new Date().getHours();
+  if (h >= 5  && h < 9)  return { label: 'Morning',   icon: '🌅', queries: ['devotional morning songs', 'classical peaceful', 'bhakti songs soft'] };
+  if (h >= 9  && h < 13) return { label: 'Focus',     icon: '🎯', queries: ['instrumental focus music', 'acoustic calm light', 'soft concentration'] };
+  if (h >= 13 && h < 17) return { label: 'Afternoon', icon: '☀️', queries: ['peppy upbeat trending', 'latest hits energy', 'dance remix popular'] };
+  if (h >= 17 && h < 21) return { label: 'Evening',   icon: '🌆', queries: ['romantic evening songs', 'mood chill relax', 'feel good music'] };
+  return                         { label: 'Night',     icon: '🌙', queries: ['slow romantic night', 'soft lullaby soothing', 'chill lofi night'] };
+}
+
+// ===== P2/P3: Smart DJ + Vibe Arcs =====
+const SMART_DJ_VIBES = {
+  auto:     { label: 'Auto (Time-based)', icon: '🕐', queries: null }, // uses getTimeOfDayContext
+  morning:  { label: 'Morning Raga',      icon: '🌅', queries: ['devotional morning', 'classical acoustic peaceful', 'bhakti soft'] },
+  focus:    { label: 'Focus Mode',        icon: '🎯', queries: ['instrumental focus', 'acoustic calm lofi', 'study concentration'] },
+  workout:  { label: 'Workout',           icon: '💪', queries: ['dance remix energetic', 'party beats fast', 'high energy songs'] },
+  party:    { label: 'Party Mode',        icon: '🎉', queries: ['party remix hits', 'dance floor peppy', 'upbeat dj songs'] },
+  chill:    { label: 'Chill',             icon: '😎', queries: ['chill lofi soft', 'mellow acoustic calm', 'relax songs slow'] },
+  romantic: { label: 'Romantic',          icon: '💕', queries: ['romantic love songs', 'pyar heart touching', 'love ballad'] },
+  winddown: { label: 'Wind Down',         icon: '🌙', queries: ['slow soothing night', 'soft lullaby peaceful', 'classical slow'] }
+};
+
+function getSmartDJQueries() {
+  const vibe = SMART_DJ_VIBES[state.smartDJVibe];
+  if (!vibe || vibe.queries === null) return getTimeOfDayContext().queries;
+  return vibe.queries;
+}
+
+function toggleSmartDJ() {
+  state.smartDJEnabled = !state.smartDJEnabled;
+  localStorage.setItem('raagam_smartdj', state.smartDJEnabled ? 'true' : 'false');
+  updateSmartDJUI();
+  if (state.smartDJEnabled) {
+    showSmartDJVibePicker();
+  } else {
+    showToast('Smart DJ off');
+    analytics.trackFeatureUsage('smart_dj_off');
+  }
+}
+
+function showSmartDJVibePicker() {
+  document.querySelector('.smart-dj-picker')?.remove();
+  const picker = document.createElement('div');
+  picker.className = 'smart-dj-picker';
+  picker.innerHTML = `
+    <div class="sdj-backdrop"></div>
+    <div class="sdj-panel">
+      <div class="sdj-header">
+        <h3>🎧 Smart DJ — Choose Your Vibe</h3>
+        <button class="sdj-close">✕</button>
+      </div>
+      <div class="sdj-vibes">
+        ${Object.entries(SMART_DJ_VIBES).map(([key, v]) => `
+          <button class="sdj-vibe-btn${state.smartDJVibe === key ? ' active' : ''}" data-vibe="${key}">
+            <span class="sdj-vibe-icon">${v.icon}</span>
+            <span>${v.label}</span>
+          </button>`).join('')}
+      </div>
+      <button class="sdj-start">Start Smart DJ</button>
+    </div>`;
+  document.body.appendChild(picker);
+  picker.querySelector('.sdj-backdrop').addEventListener('click', () => picker.remove());
+  picker.querySelector('.sdj-close').addEventListener('click', () => picker.remove());
+  picker.querySelectorAll('.sdj-vibe-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      picker.querySelectorAll('.sdj-vibe-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.smartDJVibe = btn.dataset.vibe;
+      localStorage.setItem('raagam_smartdj_vibe', state.smartDJVibe);
+    });
+  });
+  picker.querySelector('.sdj-start').addEventListener('click', () => {
+    picker.remove();
+    const vibe = SMART_DJ_VIBES[state.smartDJVibe];
+    showToast(`Smart DJ ON — ${vibe.icon} ${vibe.label}`);
+    analytics.trackFeatureUsage('smart_dj_on', { vibe: state.smartDJVibe });
+    if (state.currentTrack) buildSmartDJQueue();
+  });
+}
+
+function updateSmartDJUI() {
+  $('#np-smartdj-btn')?.classList.toggle('active', state.smartDJEnabled);
+}
+
+async function buildSmartDJQueue() {
+  if (state.smartDJBusy || !state.smartDJEnabled) return;
+  state.smartDJBusy = true;
+  try {
+    const queries = getSmartDJQueries();
+    const query = queries[Math.floor(Math.random() * queries.length)];
+    const lang = CONFIG.preferredLanguage;
+    let searchQuery = query;
+    if (lang && lang !== 'all') {
+      const ld = CONFIG.supportedLanguages[lang];
+      if (ld) searchQuery = `${ld.keywords[0]} ${query}`;
+    }
+    const results = await apiSearch(searchQuery, 20);
+    if (!results.length) return;
+    const playedIds = new Set(state.playedTracks.map(t => t.id));
+    const fresh = results.filter(t => !playedIds.has(t.id));
+    const recs = getRecommendedTracks(state.currentTrack, fresh.length ? fresh : results, state.playedTracks, 6);
+    if (!recs.length) return;
+    const existingIds = new Set(state.queue.map(t => t.id));
+    const newTracks = recs.filter(t => !existingIds.has(t.id));
+    if (newTracks.length > 0) {
+      state.queue.splice(state.queueIndex + 1, 0, ...newTracks);
+      renderQueue();
+      const vibe = SMART_DJ_VIBES[state.smartDJVibe];
+      showToast(`Smart DJ: ${newTracks.length} tracks queued (${vibe?.icon || ''} ${vibe?.label || state.smartDJVibe})`);
+    }
+  } catch(e) {
+    console.warn('[Smart DJ]', e);
+  } finally {
+    state.smartDJBusy = false;
+  }
+}
+
+// ===== P4: Gapless Playback =====
+function setupGaplessListener() {
+  audio.addEventListener('timeupdate', () => {
+    if (!state.gaplessEnabled || state.crossfadeDuration > 0) return;
+    if (!audio.duration || state.gaplessPreloaded) return;
+    const remaining = audio.duration - audio.currentTime;
+    if (remaining > 25 || remaining <= 0) return;
+    const nextIdx = state.shuffle
+      ? Math.floor(Math.random() * state.queue.length)
+      : state.queueIndex + 1;
+    if (nextIdx >= state.queue.length) return;
+    const nextTrack = state.queue[nextIdx];
+    const nextUrl = getAudioUrl(nextTrack);
+    if (!nextUrl || nextUrl === state.gaplessPreloadUrl) return;
+    state.gaplessPreloadUrl = nextUrl;
+    state.gaplessPreloaded = true;
+    if (!state.crossfadeAudio) state.crossfadeAudio = new Audio();
+    state.crossfadeAudio.preload = 'auto';
+    state.crossfadeAudio.src = nextUrl;
+    state.crossfadeAudio.volume = audio.volume;
+    state.crossfadeAudio.load();
+    console.log('[Gapless] Pre-buffering next track');
+  });
+}
+
+function toggleGapless() {
+  state.gaplessEnabled = !state.gaplessEnabled;
+  localStorage.setItem('raagam_gapless', state.gaplessEnabled ? 'true' : 'false');
+  const btn = $('#settings-gapless');
+  if (btn) btn.textContent = state.gaplessEnabled ? 'On' : 'Off';
+  showToast(state.gaplessEnabled ? 'Gapless playback ON — pre-buffers next song' : 'Gapless playback OFF');
+  analytics.trackFeatureUsage('gapless_toggle', { enabled: state.gaplessEnabled });
+}
+
+// ===== P5: Volume Normalization =====
+function toggleVolumeNorm() {
+  state.volumeNormEnabled = !state.volumeNormEnabled;
+  localStorage.setItem('raagam_volnorm', state.volumeNormEnabled ? 'true' : 'false');
+  if (equalizer.compressor && equalizer.context) {
+    const now = equalizer.context.currentTime;
+    if (state.volumeNormEnabled) {
+      equalizer.compressor.threshold.setValueAtTime(-18, now);
+      equalizer.compressor.ratio.setValueAtTime(4, now);
+    } else {
+      equalizer.compressor.threshold.setValueAtTime(0, now);
+      equalizer.compressor.ratio.setValueAtTime(1, now);
+    }
+  }
+  const btn = $('#settings-volnorm');
+  if (btn) btn.textContent = state.volumeNormEnabled ? 'On' : 'Off';
+  showToast(state.volumeNormEnabled ? 'Volume normalization ON — consistent loudness' : 'Volume normalization OFF');
+  analytics.trackFeatureUsage('volnorm_toggle', { enabled: state.volumeNormEnabled });
+}
+
+// ===== P7: Daily Mixes =====
+async function generateDailyMixes() {
+  const today = new Date().toDateString();
+  try {
+    const stored = JSON.parse(localStorage.getItem('raagam_daily_mixes') || 'null');
+    if (stored?.date === today && stored?.mixes?.length) return stored.mixes;
+  } catch(e) {}
+  const lang = CONFIG.preferredLanguage || 'hindi';
+  const ld = CONFIG.supportedLanguages[lang];
+  const lk = ld?.keywords[0] || 'hindi';
+  const timeCtx = getTimeOfDayContext();
+  const likedArtist = state.liked.length
+    ? getArtistName(state.liked[Math.floor(Math.random() * Math.min(state.liked.length, 5))])
+    : null;
+  const mixes = [
+    {
+      id: 'mix-liked', title: 'Your Daily Mix',
+      subtitle: state.liked.length > 0 ? `Based on ${state.liked.length} liked songs` : 'Popular picks for you',
+      icon: '❤️', gradient: 'linear-gradient(135deg,#e91e63,#9c27b0)',
+      query: likedArtist ? `${likedArtist} songs` : `${lk} trending songs`
+    },
+    {
+      id: 'mix-time', title: timeCtx.label + ' Mix',
+      subtitle: 'Perfect for right now', icon: timeCtx.icon,
+      gradient: 'linear-gradient(135deg,#1DB954,#005f2e)',
+      query: `${lk} ${timeCtx.queries[0]}`
+    },
+    {
+      id: 'mix-discover', title: 'Discover Weekly',
+      subtitle: "Fresh songs you haven't heard", icon: '🔍',
+      gradient: 'linear-gradient(135deg,#7c3aed,#1e3a8a)',
+      query: `new latest ${lk} songs 2025`
+    },
+    {
+      id: 'mix-chill', title: 'Chill Vibes',
+      subtitle: 'Sit back and relax', icon: '😎',
+      gradient: 'linear-gradient(135deg,#0891b2,#164e63)',
+      query: `${lk} chill lofi soft songs`
+    },
+    {
+      id: 'mix-party', title: 'Party Starter',
+      subtitle: 'Turn up the energy', icon: '🎉',
+      gradient: 'linear-gradient(135deg,#dc2626,#7c3aed)',
+      query: `${lk} party dance remix energetic`
+    }
+  ];
+  localStorage.setItem('raagam_daily_mixes', JSON.stringify({ date: today, mixes }));
+  return mixes;
+}
+
+async function renderDailyMixes() {
+  const container = $('#daily-mixes-row');
+  if (!container) return;
+  try {
+    const mixes = await generateDailyMixes();
+    container.innerHTML = mixes.map(mix => `
+      <div class="mix-card" data-query="${mix.query}" data-title="${mix.title}">
+        <div class="mix-card-art" style="background:${mix.gradient}">
+          <span class="mix-card-icon">${mix.icon}</span>
+          <button class="mix-play-btn" aria-label="Play ${mix.title}">▶</button>
+        </div>
+        <p class="mix-card-title">${mix.title}</p>
+        <p class="mix-card-sub">${mix.subtitle}</p>
+      </div>`).join('');
+    container.querySelectorAll('.mix-card').forEach(card => {
+      const playHandler = async () => {
+        const query = card.dataset.query;
+        const title = card.dataset.title;
+        showToast(`Loading ${title}...`);
+        const tracks = await apiSearch(query, 15);
+        if (!tracks.length) { showToast('Could not load mix'); return; }
+        state.queue = tracks; state.queueIndex = 0;
+        playSong(tracks[0], false);
+        analytics.trackFeatureUsage('daily_mix_play', { mix: title });
+      };
+      card.addEventListener('click', playHandler);
+      card.querySelector('.mix-play-btn')?.addEventListener('click', (e) => { e.stopPropagation(); playHandler(); });
+    });
+  } catch(e) {
+    console.warn('[Daily Mixes]', e);
+  }
 }
 
 function detectMood(track) {
@@ -1049,6 +1336,9 @@ async function loadHome() {
   } else {
     recentRow.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">Play some songs to see them here</p>';
   }
+
+  // P7: Daily Mixes
+  renderDailyMixes();
 
   // Load sections — dynamic based on user's preferred language
   const lang = CONFIG.preferredLanguage || 'hindi';
@@ -1449,6 +1739,15 @@ function playSong(track, addToQueue = true) {
   state.playedTracks.unshift(track);
   if (state.playedTracks.length > 20) state.playedTracks = state.playedTracks.slice(0, 20);
 
+  // P4: Reset gapless pre-buffer state for new track
+  state.gaplessPreloaded = false;
+  state.gaplessPreloadUrl = null;
+
+  // P2: Smart DJ — build more songs when queue is running low
+  if (state.smartDJEnabled && (state.queue.length - state.queueIndex) <= 3) {
+    setTimeout(() => buildSmartDJQueue(), 3000);
+  }
+
   if (addToQueue) {
     // Add to queue after current position
     const existsIdx = state.queue.findIndex(t => t.id === track.id);
@@ -1510,6 +1809,10 @@ function togglePlay() {
 }
 
 function playNext() {
+  // P1: Record skip if user moved on early (< 30s of a non-ending track)
+  if (state.currentTrack && audio.duration && audio.currentTime < audio.duration - 2) {
+    recordSkipSignal(state.currentTrack);
+  }
   if (state.queue.length === 0) {
     // If queue is empty, try smart queue, then auto-play
     if (state.smartQueueEnabled && state.currentTrack) {
@@ -1627,6 +1930,10 @@ async function getAutoPlayRecommendations() {
     if (searchQueries.length === 0) {
       searchQueries.push(getArtistName(state.currentTrack));
     }
+
+    // P6: Time-of-day context — prepend one contextual query
+    const timeCtx = getTimeOfDayContext();
+    searchQueries.unshift(timeCtx.queries[0]);
 
     // Try each search query until we find good recommendations
     let allResults = [];
@@ -1937,11 +2244,20 @@ const equalizer = {
       this.filters.treble.type = 'highshelf';
       this.filters.treble.frequency.value = 6000;
 
-      // Chain: source → bass → mid → treble → destination
+      // P5: Volume normalization compressor
+      this.compressor = this.context.createDynamicsCompressor();
+      this.compressor.threshold.setValueAtTime(state.volumeNormEnabled ? -18 : 0, this.context.currentTime);
+      this.compressor.knee.setValueAtTime(10, this.context.currentTime);
+      this.compressor.ratio.setValueAtTime(state.volumeNormEnabled ? 4 : 1, this.context.currentTime);
+      this.compressor.attack.setValueAtTime(0.003, this.context.currentTime);
+      this.compressor.release.setValueAtTime(0.25, this.context.currentTime);
+
+      // Chain: source → bass → mid → treble → compressor → destination
       this.source.connect(this.filters.bass);
       this.filters.bass.connect(this.filters.mid);
       this.filters.mid.connect(this.filters.treble);
-      this.filters.treble.connect(this.context.destination);
+      this.filters.treble.connect(this.compressor);
+      this.compressor.connect(this.context.destination);
 
       this.connected = true;
 
@@ -2604,6 +2920,8 @@ function updatePlayerUI() {
 
   // Auto-play
   $('#np-autoplay')?.classList.toggle('active', state.autoPlayMode);
+  // P2: Smart DJ button state
+  updateSmartDJUI();
 
   // EQ, Speed, Sleep button states
   $('#np-eq-btn')?.classList.toggle('active', state.eqPreset !== 'off');
@@ -5416,6 +5734,64 @@ function showFeatureTour() {
           </div>
         </div>
 
+        <div class="ft-category">🧠 Intelligence Features</div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">🎧</div>
+          <div class="ft-card-info">
+            <h4>Smart DJ Mode <span class="ft-badge-new">NEW</span></h4>
+            <p>One tap on the Smart DJ button in Now Playing. Choose a vibe (Morning, Workout, Party, Chill, Romantic, Wind Down) and the app automatically builds and refreshes your queue — completely hands-free.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">🌅</div>
+          <div class="ft-card-info">
+            <h4>Energy Vibe Arcs <span class="ft-badge-new">NEW</span></h4>
+            <p>7 intelligent vibes: Auto (time-based), Morning Raga, Focus Mode, Workout, Party, Chill, Romantic, Wind Down. Each vibe targets specific genres, tempos and moods. Auto-mode detects time of day and picks the right vibe automatically.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">📈</div>
+          <div class="ft-card-info">
+            <h4>Skip Signal Learning <span class="ft-badge-new">NEW</span></h4>
+            <p>Raagam learns from your skips. Skip a song before 30 seconds and that artist/genre gets down-ranked in future recommendations. The more you use it, the smarter it gets — all stored locally, no account needed.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">🕐</div>
+          <div class="ft-card-info">
+            <h4>Time-of-Day Music Context <span class="ft-badge-new">NEW</span></h4>
+            <p>Autoplay recommendations are now context-aware. Morning? You'll get devotional and classical songs. Evening? Romantic and chill. Night? Slow and soothing. The right music at the right time, automatically.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">📅</div>
+          <div class="ft-card-info">
+            <h4>Daily Mixes <span class="ft-badge-new">NEW</span></h4>
+            <p>5 fresh mixes generated every day on your home screen: Your Daily Mix (based on liked songs), a time-of-day mix, Discover Weekly (new songs you haven't heard), Chill Vibes, and Party Starter. One tap to play any mix.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">🔇</div>
+          <div class="ft-card-info">
+            <h4>Gapless Playback <span class="ft-badge-new">NEW</span></h4>
+            <p>Enable in Settings. Raagam pre-buffers the next song 25 seconds before the current one ends — so there's zero gap between tracks. Seamless listening experience like a real streaming service.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">🔊</div>
+          <div class="ft-card-info">
+            <h4>Volume Normalization <span class="ft-badge-new">NEW</span></h4>
+            <p>Enable in Settings. Uses Web Audio API's dynamics compressor to keep all songs at a consistent loudness level. No more sudden loud or quiet songs — everything plays at the right volume.</p>
+          </div>
+        </div>
+
         <div class="ft-footer">
           <button class="ft-start-btn" onclick="this.closest('.feature-tour-overlay').remove()">
             🎵 Start Listening
@@ -6217,6 +6593,26 @@ function setupEvents() {
   // Visualizer toggle
   const npVisualizerBtn = $('#np-visualizer-btn');
   if (npVisualizerBtn) npVisualizerBtn.addEventListener('click', toggleVisualizer);
+
+  // P2: Smart DJ button
+  const npSmartDJBtn = $('#np-smartdj-btn');
+  if (npSmartDJBtn) npSmartDJBtn.addEventListener('click', toggleSmartDJ);
+  updateSmartDJUI();
+
+  // P4: Gapless Playback toggle
+  setupGaplessListener();
+  const gaplessBtn = $('#settings-gapless');
+  if (gaplessBtn) {
+    gaplessBtn.textContent = state.gaplessEnabled ? 'On' : 'Off';
+    gaplessBtn.addEventListener('click', toggleGapless);
+  }
+
+  // P5: Volume Normalization toggle
+  const volNormBtn = $('#settings-volnorm');
+  if (volNormBtn) {
+    volNormBtn.textContent = state.volumeNormEnabled ? 'On' : 'Off';
+    volNormBtn.addEventListener('click', toggleVolumeNorm);
+  }
 
   // Smart Queue toggle in settings
   const smartQueueToggle = $('#smart-queue-toggle');

@@ -77,6 +77,10 @@
       <!-- Home View -->
       <div id="view-home" class="view active">
         <div class="quick-picks" id="quick-picks"></div>
+        <section class="section" id="section-daily-mixes">
+          <h2 class="section-title">Your Daily Mixes</h2>
+          <div class="scroll-row mix-row" id="daily-mixes-row"></div>
+        </section>
         <section class="section" id="section-trending">
           <h2 class="section-title" id="trending-title">Trending Now</h2>
           <div class="scroll-row" id="trending-row"></div>
@@ -266,6 +270,10 @@
           <button id="np-autoplay" class="icon-btn np-secondary np-extra-btn" aria-label="Auto Play">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 6v3l4-4-4-4v3c-4.42 0-8 3.58-8 8 0 1.57.46 3.03 1.24 4.26L6.7 14.8A5.87 5.87 0 0 1 6 12c0-3.31 2.69-6 6-6zm6.76 1.74L17.3 9.2c.44.84.7 1.79.7 2.8 0 3.31-2.69 6-6 6v-3l-4 4 4 4v-3c4.42 0 8-3.58 8-8 0-1.57-.46-3.03-1.24-4.26z"/></svg>
             <span>Autoplay</span>
+          </button>
+          <button id="np-smartdj-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Smart DJ">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2zm0 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm-1 2h2v2.28A6 6 0 0 1 18 20H6a6 6 0 0 1 5-5.72V12zm5.66 3.07L15 17.73V22h-1v-4.27l-2.66-2.66 1.42-1.41L14 15.86l1.24-1.2 1.42 1.41z"/></svg>
+            <span>Smart DJ</span>
           </button>
           <button id="np-add-playlist-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Add to Playlist">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M14 10H2v2h12v-2zm0-4H2v2h12V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM2 16h8v-2H2v2z"/></svg>
@@ -617,6 +625,20 @@
         <div class="setting-item">
           <span>Crossfade</span>
           <button id="settings-crossfade" style="background:var(--bg-card);color:var(--text-primary);border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">Off</button>
+        </div>
+        <div class="setting-item">
+          <div>
+            <div>Gapless Playback</div>
+            <div style="font-size:11px;color:#b3b3b3;margin-top:2px;">Pre-buffers next song for seamless transitions</div>
+          </div>
+          <button id="settings-gapless" style="background:var(--bg-card);color:var(--text-primary);border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">Off</button>
+        </div>
+        <div class="setting-item">
+          <div>
+            <div>Volume Normalization</div>
+            <div style="font-size:11px;color:#b3b3b3;margin-top:2px;">Consistent loudness across all songs</div>
+          </div>
+          <button id="settings-volnorm" style="background:var(--bg-card);color:var(--text-primary);border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">On</button>
         </div>
         <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
