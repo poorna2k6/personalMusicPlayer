@@ -1,5 +1,5 @@
 // Raagam Service Worker — Alarm & Caching
-const CACHE_NAME = 'raagam-v3.5';
+const CACHE_NAME = 'raagam-v3.6';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -33,27 +33,39 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch — network-first with cache fallback
+// Fetch — network-first with cache fallback + navigation fallback to index.html
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Only cache same-origin static assets
+  // Only handle same-origin requests
   if (url.origin !== self.location.origin) return;
 
-  // Skip API calls
+  // Skip API calls — let them go to network directly
   if (url.pathname.includes('/api/')) return;
 
   event.respondWith(
     fetch(event.request)
       .then(response => {
-        // Cache successful responses
-        if (response.ok) {
+        // Cache successful same-origin static responses
+        if (response.ok && event.request.method === 'GET') {
           const clone = response.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
         }
         return response;
       })
-      .catch(() => caches.match(event.request))
+      .catch(async () => {
+        // Network failed — serve from cache
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        // For navigation requests (page loads), serve index.html as fallback
+        // so the app shell always loads even offline
+        if (event.request.mode === 'navigate') {
+          const indexCache = await caches.match('./index.html');
+          if (indexCache) return indexCache;
+        }
+        // No cache hit — return a minimal offline response
+        return new Response('', { status: 503, statusText: 'Service Unavailable' });
+      })
   );
 });
 

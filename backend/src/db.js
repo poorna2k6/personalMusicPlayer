@@ -78,10 +78,13 @@ function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
     CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album);
+    CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre);
     CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id);
     CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id);
     CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type);
     CREATE INDEX IF NOT EXISTS idx_analytics_timestamp ON analytics_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_analytics_type_timestamp ON analytics_events(event_type, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON analytics_sessions(start_time);
   `);
 
   return db;

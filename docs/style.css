@@ -1997,6 +1997,49 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 0 25px rgba(var(--deck-color-rgb, 0,240,255), 0.2), inset 0 1px 0 rgba(var(--deck-color-rgb, 0,240,255), 0.15);
 }
 
+/* Playing deck: bright glow + pulsing border when Auto DJ is mixing on this deck */
+.dj-deck.dj-deck-playing {
+  border-color: var(--deck-color, #00f0ff);
+  box-shadow:
+    0 0 0 2px rgba(var(--deck-color-rgb, 0,240,255), 0.4),
+    0 0 30px rgba(var(--deck-color-rgb, 0,240,255), 0.35),
+    0 0 60px rgba(var(--deck-color-rgb, 0,240,255), 0.15),
+    inset 0 1px 0 rgba(var(--deck-color-rgb, 0,240,255), 0.2);
+  animation: deck-glow-pulse 2s ease-in-out infinite;
+}
+@keyframes deck-glow-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px rgba(var(--deck-color-rgb, 0,240,255), 0.4),
+      0 0 30px rgba(var(--deck-color-rgb, 0,240,255), 0.35),
+      0 0 60px rgba(var(--deck-color-rgb, 0,240,255), 0.15),
+      inset 0 1px 0 rgba(var(--deck-color-rgb, 0,240,255), 0.2);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgba(var(--deck-color-rgb, 0,240,255), 0.6),
+      0 0 45px rgba(var(--deck-color-rgb, 0,240,255), 0.5),
+      0 0 80px rgba(var(--deck-color-rgb, 0,240,255), 0.25),
+      inset 0 1px 0 rgba(var(--deck-color-rgb, 0,240,255), 0.3);
+  }
+}
+/* Deck number badge pulses when that deck is playing */
+.dj-deck.dj-deck-playing .dj-deck-number {
+  animation: deck-num-pulse 2s ease-in-out infinite;
+}
+@keyframes deck-num-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.75; transform: scale(1.08); }
+}
+/* Waveform canvas glows on the playing deck */
+.dj-deck.dj-deck-playing .dj-waveform-canvas {
+  filter: drop-shadow(0 0 6px rgba(var(--deck-color-rgb, 0,240,255), 0.5));
+}
+/* EQ rotary knob fill glows on the playing deck */
+.dj-deck.dj-deck-playing .dj-rotary-fill {
+  filter: drop-shadow(0 0 3px rgba(var(--deck-color-rgb, 0,240,255), 0.8));
+}
+
 /* Deck Header */
 .dj-deck-header {
   display: flex;
@@ -3217,3 +3260,233 @@ a { color: inherit; text-decoration: none; }
 .episode-play-btn:hover {
   transform: scale(1.05);
 }
+
+/* ===== Smart DJ Picker ===== */
+.smart-dj-picker { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: flex-end; }
+.sdj-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.65); }
+.sdj-panel { position: relative; width: 100%; max-width: 480px; margin: 0 auto; background: #1a1a2e; border-radius: 24px 24px 0 0; padding: 24px 20px 36px; z-index: 1; }
+.sdj-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.sdj-header h3 { font-size: 17px; font-weight: 700; color: #fff; }
+.sdj-close { background: none; border: none; color: #b3b3b3; font-size: 20px; cursor: pointer; padding: 4px 8px; }
+.sdj-vibes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
+.sdj-vibe-btn { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.06); border: 1.5px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px 14px; color: #e0e0e0; font-size: 14px; cursor: pointer; transition: all 0.2s; text-align: left; }
+.sdj-vibe-btn:hover { background: rgba(29,185,84,0.12); border-color: rgba(29,185,84,0.4); }
+.sdj-vibe-btn.active { background: rgba(29,185,84,0.18); border-color: #1DB954; color: #fff; }
+.sdj-vibe-icon { font-size: 22px; }
+.sdj-start { width: 100%; padding: 14px; background: linear-gradient(135deg,#1DB954,#15803d); color: #000; font-weight: 700; font-size: 16px; border: none; border-radius: 50px; cursor: pointer; transition: opacity 0.2s; }
+.sdj-start:hover { opacity: 0.9; }
+#np-smartdj-btn.active { color: #1DB954; }
+#np-smartdj-btn.active svg { filter: drop-shadow(0 0 4px #1DB954); }
+
+/* ===== Daily Mixes ===== */
+.mix-row { gap: 14px; padding-bottom: 8px; }
+.mix-card { min-width: 140px; max-width: 140px; cursor: pointer; flex-shrink: 0; }
+.mix-card-art { position: relative; width: 140px; height: 140px; border-radius: 14px; overflow: hidden; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+.mix-card-icon { font-size: 48px; }
+.mix-play-btn { position: absolute; bottom: 8px; right: 8px; width: 36px; height: 36px; border-radius: 50%; background: rgba(0,0,0,0.6); color: #fff; border: none; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
+.mix-card:hover .mix-play-btn, .mix-card:active .mix-play-btn { opacity: 1; }
+.mix-card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mix-card-sub { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+
+/* ===== Feature Tour — New badges ===== */
+.ft-card-new { border-left: 3px solid #1DB954; }
+.ft-badge-new { display: inline-block; background: linear-gradient(135deg,#1DB954,#06b6d4); color: #000; font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 8px; vertical-align: middle; margin-left: 6px; letter-spacing: 0.5px; text-transform: uppercase; }
+
+/* ===== Unified Auto DJ Button ===== */
+.auto-dj-btn { position: relative; transition: color 0.2s, transform 0.2s; }
+.auto-dj-btn.active { color: #1DB954 !important; }
+.auto-dj-btn.active svg { filter: drop-shadow(0 0 6px #1DB954); animation: autodj-pulse 2s ease-in-out infinite; }
+@keyframes autodj-pulse {
+  0%, 100% { filter: drop-shadow(0 0 4px #1DB954); }
+  50%       { filter: drop-shadow(0 0 10px #1DB954) drop-shadow(0 0 20px #1DB95460); }
+}
+
+/* Mini player Auto DJ button */
+.mini-autodj-btn { color: var(--text-dim); padding: 4px; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.mini-autodj-btn.active { color: #1DB954; }
+
+/* AUTO badge on mini player */
+.mini-autodj-badge {
+  position: absolute;
+  top: -6px; right: -6px;
+  background: linear-gradient(135deg, #1DB954, #06b6d4);
+  color: #000;
+  font-size: 7px;
+  font-weight: 900;
+  padding: 2px 4px;
+  border-radius: 6px;
+  letter-spacing: 0.3px;
+  animation: badge-blink 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes badge-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+/* Auto DJ vibe menu — stop button */
+.sdj-stop {
+  width: 100%;
+  padding: 12px;
+  margin-top: 8px;
+  background: rgba(255, 60, 60, 0.12);
+  border: 1px solid rgba(255, 60, 60, 0.3);
+  border-radius: 50px;
+  color: #ff5252;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.sdj-stop:hover { background: rgba(255, 60, 60, 0.22); }
+.sdj-subhead { font-size: 12px; color: #b3b3b3; margin-top: 2px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   DJ SESSION SETUP MODAL
+   ═══════════════════════════════════════════════════════════════════ */
+.dj-session-modal {
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+}
+.dj-session-modal.hidden { display: none; }
+
+.dj-session-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+}
+
+.dj-session-panel {
+  position: relative; z-index: 1;
+  background: linear-gradient(160deg, #0d0d20 0%, #111128 100%);
+  border: 1px solid rgba(29, 185, 84, 0.25);
+  border-radius: 18px;
+  padding: 24px;
+  width: min(520px, 95vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.7), 0 0 40px rgba(29,185,84,0.08);
+}
+
+.dj-session-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 20px;
+}
+.dj-session-logo {
+  font-size: 18px; font-weight: 800; letter-spacing: 1px;
+  background: linear-gradient(135deg, #1DB954, #06b6d4);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.dj-session-close {
+  background: rgba(255,255,255,0.08); border: none; color: #ccc;
+  width: 30px; height: 30px; border-radius: 50%; cursor: pointer;
+  font-size: 14px; display: flex; align-items: center; justify-content: center;
+  transition: background 0.2s;
+}
+.dj-session-close:hover { background: rgba(255,255,255,0.18); color: #fff; }
+
+.dj-session-section { margin-bottom: 18px; }
+.dj-session-section-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  color: #888; margin-bottom: 10px; display: flex; align-items: baseline; gap: 8px;
+}
+.dj-sess-hint { font-size: 10px; color: #555; letter-spacing: 0; text-transform: none; font-weight: 400; }
+.dj-arc-legend { font-size: 10px; color: #666; letter-spacing: 0; text-transform: none; font-weight: 400; gap: 4px; }
+
+.dj-session-btn-grid {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.dj-sess-btn {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  color: #ccc; border-radius: 20px; padding: 7px 14px; font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s; white-space: nowrap;
+}
+.dj-sess-btn:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.25); color: #fff; }
+.dj-sess-btn.active {
+  background: rgba(29,185,84,0.18); border-color: #1DB954; color: #1DB954; font-weight: 700;
+  box-shadow: 0 0 10px rgba(29,185,84,0.2);
+}
+
+/* Arc preview bar chart in the session setup dialog */
+.dj-session-arc-preview {
+  display: flex; align-items: flex-end; gap: 3px; height: 52px;
+  background: rgba(0,0,0,0.3); border-radius: 8px; padding: 6px 8px;
+  overflow: hidden;
+}
+.dj-arc-bar-preview {
+  flex: 1; min-width: 4px; max-width: 18px;
+  border-radius: 3px 3px 0 0;
+  transition: height 0.3s ease, background 0.3s ease;
+  opacity: 0.9;
+}
+.dj-session-arc-desc {
+  font-size: 11px; color: #666; margin-top: 6px; text-align: center;
+}
+
+/* Session start CTA button */
+.dj-session-start-btn {
+  width: 100%; padding: 14px; margin-top: 6px;
+  background: linear-gradient(135deg, #1DB954 0%, #06b6d4 100%);
+  border: none; border-radius: 30px; color: #000; font-size: 15px;
+  font-weight: 800; letter-spacing: 0.5px; cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 4px 20px rgba(29,185,84,0.35);
+}
+.dj-session-start-btn:hover { transform: scale(1.02); box-shadow: 0 6px 28px rgba(29,185,84,0.5); }
+.dj-session-start-btn:active { transform: scale(0.98); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   DJ ENERGY ARC STRIP (shown in DJ panel during active session)
+   ═══════════════════════════════════════════════════════════════════ */
+.dj-energy-arc-strip {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(0,0,0,0.4); border-top: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 8px 16px; min-height: 60px;
+}
+.dj-energy-arc-strip.hidden { display: none; }
+
+.dj-arc-strip-left { flex-shrink: 0; min-width: 70px; }
+.dj-arc-strip-title {
+  font-size: 9px; font-weight: 800; letter-spacing: 2px; color: #1DB954; text-transform: uppercase;
+}
+.dj-arc-strip-pos { font-size: 10px; color: #666; margin-top: 2px; }
+
+.dj-arc-bars-scroll { flex: 1; overflow: hidden; }
+.dj-arc-bars-row {
+  display: flex; align-items: flex-end; gap: 3px; height: 44px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.dj-arc-bars-row::-webkit-scrollbar { display: none; }
+
+.dj-arc-bar {
+  flex-shrink: 0; width: 12px; min-width: 12px;
+  border-radius: 3px 3px 0 0;
+  position: relative; cursor: default;
+  transition: height 0.4s ease, background 0.3s;
+  opacity: 0.75;
+}
+.dj-arc-bar-current {
+  opacity: 1; transform: scaleX(1.2);
+  animation: arc-bar-pulse 1.5s ease-in-out infinite;
+}
+@keyframes arc-bar-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.dj-arc-bar-past { opacity: 0.3; }
+
+/* Needle marker on current bar */
+.dj-arc-bar-needle {
+  position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+  width: 2px; height: 6px; background: #fff; border-radius: 1px;
+}
+
+.dj-arc-strip-right { flex-shrink: 0; text-align: right; min-width: 70px; }
+.dj-arc-next-label { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px; }
+.dj-arc-refresh-btn {
+  font-size: 10px; padding: 3px 8px; border-radius: 10px;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+  color: #888; cursor: pointer; transition: all 0.2s;
+}
+.dj-arc-refresh-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }

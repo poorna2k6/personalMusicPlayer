@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createPlaylist } from '../api';
 
-export default function Sidebar({ view, setView, playlists, onSelectPlaylist, onUpdate }) {
+export default function Sidebar({ view, setView, playlists, onSelectPlaylist, onUpdate, hasRecentlyPlayed }) {
   const [showNewPlaylist, setShowNewPlaylist] = useState(false);
   const [newName, setNewName] = useState('');
 
@@ -17,6 +17,7 @@ export default function Sidebar({ view, setView, playlists, onSelectPlaylist, on
     { id: 'tracks', label: 'All Tracks', icon: MusicIcon },
     { id: 'artists', label: 'Artists', icon: ArtistIcon },
     { id: 'albums', label: 'Albums', icon: AlbumIcon },
+    ...(hasRecentlyPlayed ? [{ id: 'recent', label: 'Recently Played', icon: RecentIcon }] : []),
   ];
 
   return (
@@ -118,6 +119,14 @@ function AlbumIcon() {
   return (
     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 7a3 3 0 100 6 3 3 0 000-6z" />
+    </svg>
+  );
+}
+
+function RecentIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
     </svg>
   );
 }
