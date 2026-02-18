@@ -5,6 +5,19 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 const audio = document.querySelector('#audio');
 
+// ===== Safe localStorage helper — prevents black screen from corrupted data =====
+function safeParse(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    return JSON.parse(raw);
+  } catch (e) {
+    console.warn(`[safeParse] Corrupted localStorage key "${key}" — cleared.`, e);
+    try { localStorage.removeItem(key); } catch (_) {}
+    return fallback;
+  }
+}
+
 // ===== Config =====
 const CONFIG = {
   apiBase: localStorage.getItem('raagam_api') || 'https://jiosaavn-api-privatecvc2.vercel.app',
@@ -18,7 +31,7 @@ const CONFIG = {
     'https://saavn.dev/api'
   ],
   preferredLanguage: localStorage.getItem('raagam_language') || null,
-  userProfile: JSON.parse(localStorage.getItem('raagam_profile') || 'null'),
+  userProfile: safeParse('raagam_profile', null),
   supportedLanguages: {
     'hindi': { name: 'Hindi', keywords: ['hindi', 'bollywood', 'filmi', 'indian pop'] },
     'telugu': { name: 'Telugu', keywords: ['telugu', 'tollywood', 'telangana'] },
@@ -43,9 +56,9 @@ const state = {
   isPlaying: false,
   shuffle: false,
   repeat: 'off', // off, all, one
-  liked: JSON.parse(localStorage.getItem('raagam_liked') || '[]'),
-  recent: JSON.parse(localStorage.getItem('raagam_recent') || '[]'),
-  history: JSON.parse(localStorage.getItem('raagam_history') || '[]'),  // [{track, playedAt}]
+  liked: safeParse('raagam_liked', []),
+  recent: safeParse('raagam_recent', []),
+  history: safeParse('raagam_history', []),  // [{track, playedAt}]
   currentView: 'home',
   searchCache: {},
   albumCache: {},   // { albumId: albumData }
@@ -55,8 +68,8 @@ const state = {
   playedTracks: [], // tracks played in current session for recommendations
   languageSetupComplete: localStorage.getItem('raagam_language_setup') === 'true',
   userProfile: CONFIG.userProfile,
-  favoriteGenres: JSON.parse(localStorage.getItem('raagam_favorite_genres') || '[]'),
-  listeningHistory: JSON.parse(localStorage.getItem('raagam_listening_history') || '[]'),
+  favoriteGenres: safeParse('raagam_favorite_genres', []),
+  listeningHistory: safeParse('raagam_listening_history', []),
   // New feature states
   sleepTimer: null,         // setTimeout reference
   sleepTimerEnd: null,      // timestamp when sleep fires
@@ -66,7 +79,7 @@ const state = {
   lyricsCache: {},          // { trackId: { lyrics, copyright } }
   lyricsVisible: false,
   // Alarm state
-  alarm: JSON.parse(localStorage.getItem('raagam_alarm') || 'null'),  // { time, songId, songData, autoplay, gentle }
+  alarm: safeParse('raagam_alarm', null),  // { time, songId, songData, autoplay, gentle }
   alarmTimer: null,
   alarmCheckInterval: null,
   alarmSelectedSong: null,  // temp song selection in dialog
@@ -75,7 +88,7 @@ const state = {
   alarmWakeLock: null,
   alarmSWRegistration: null,
   // Custom Playlists
-  playlists: JSON.parse(localStorage.getItem('raagam_playlists') || '[]'), // [{id,name,tracks:[],createdAt}]
+  playlists: safeParse('raagam_playlists', []), // [{id,name,tracks:[],createdAt}]
   // Crossfade
   crossfadeDuration: parseInt(localStorage.getItem('raagam_crossfade') || '0'), // seconds (0=off)
   crossfadeAudio: null, // second Audio element for crossfade
@@ -112,7 +125,7 @@ const state = {
   offlineDownloading: new Set(), // Set of track IDs currently downloading
   // ── Priority Feature States ──────────────────────────────────────
   // P1: Skip Signal Learning
-  skipSignals: JSON.parse(localStorage.getItem('raagam_skip_signals') || '{}'),
+  skipSignals: safeParse('raagam_skip_signals', {}),
   // P2/P3: Smart DJ + Vibe Arcs
   smartDJEnabled: localStorage.getItem('raagam_smartdj') === 'true',
   smartDJVibe: localStorage.getItem('raagam_smartdj_vibe') || 'auto',
@@ -1939,7 +1952,16 @@ function playSong(track, addToQueue = true) {
 function togglePlay() {
   if (!state.currentTrack) return;
   if (audio.paused) {
-    audio.play();
+    audio.play().catch(e => {
+      if (e.name === 'AbortError') return; // interrupted by new src — harmless
+      if (e.name === 'NotAllowedError') {
+        showToast('Tap to play — browser needs a gesture first');
+      } else {
+        showToast('Could not resume playback');
+      }
+      state.isPlaying = false;
+      updatePlayerUI();
+    });
     state.isPlaying = true;
     analytics.trackMusicAction('resume');
   } else {
@@ -7012,11 +7034,32 @@ function setupEvents() {
   seek.addEventListener('touchend', () => seek._dragging = false);
   seek.addEventListener('change', () => seek._dragging = false);
 
+  // Allow CORS so Web Audio API can read the stream (same as DJ deck elements)
+  audio.crossOrigin = 'anonymous';
+
   // Audio events
   audio.addEventListener('timeupdate', updateProgress);
   audio.addEventListener('ended', playNext);
   audio.addEventListener('play', () => { state.isPlaying = true; updatePlayerUI(); });
   audio.addEventListener('pause', () => { state.isPlaying = false; updatePlayerUI(); });
+  audio.addEventListener('error', (e) => {
+    const err = audio.error;
+    const MESSAGES = {
+      1: 'Playback aborted',
+      2: 'Network error — check your connection',
+      3: 'Track could not be decoded',
+      4: 'Track not supported or unavailable',
+    };
+    const msg = (err && MESSAGES[err.code]) || 'Could not play track';
+    console.warn('[audio error]', err?.code, err?.message);
+    if (state.currentTrack) {
+      showToast(`${msg} — trying next`);
+      state.isPlaying = false;
+      updatePlayerUI();
+      // Auto-advance to next track after a short delay
+      setTimeout(() => { if (!state.isPlaying) playNext(); }, 1200);
+    }
+  });
 
   // Queue
   $('#np-queue-btn').addEventListener('click', openQueue);
@@ -8934,26 +8977,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
   init();
 
-  // Recovery: if app remains hidden after initialization and no dialog is visible, force-show the UI
-  setTimeout(() => {
+  // Recovery: if app remains hidden after initialization, force-show at 1.5s / 4s / 8s.
+  // The 8-second hard recovery also dismisses stuck dialogs (profile / language) that
+  // may have failed to attach event listeners, which would otherwise leave a black screen.
+  function _uiRecovery(hard) {
     try {
-      const appEl = $('#app');
-      const splashEl = $('#splash');
-      const profileDlg = $('#profile-dialog');
-      const langDlg = $('#language-dialog');
-      if (appEl && appEl.classList.contains('hidden') &&
-        (!profileDlg || profileDlg.classList.contains('hidden')) &&
-        (!langDlg || langDlg.classList.contains('hidden')) ) {
-        console.warn('UI recovery: forcing app to show because initialization did not complete.');
-        appEl.classList.remove('hidden');
-        if (splashEl) {
-          splashEl.style.opacity = '0';
-          setTimeout(() => splashEl.remove(), 400);
+      const appEl  = $('#app');
+      const splash = $('#splash');
+      const pdlg   = $('#profile-dialog');
+      const ldlg   = $('#language-dialog');
+      if (!appEl || !appEl.classList.contains('hidden')) return; // already visible
+
+      const dialogsHidden = (!pdlg || pdlg.classList.contains('hidden')) &&
+                            (!ldlg || ldlg.classList.contains('hidden'));
+
+      if (dialogsHidden || hard) {
+        // Hide any stuck dialogs on hard recovery
+        if (hard && !dialogsHidden) {
+          pdlg?.classList.add('hidden');
+          ldlg?.classList.add('hidden');
+          // Create a minimal profile so init() won't loop back
+          if (!state.userProfile) {
+            state.userProfile = CONFIG.userProfile = { name: 'Music Lover', phone: '' };
+            localStorage.setItem('raagam_profile', JSON.stringify(state.userProfile));
+          }
+          if (!state.languageSetupComplete) {
+            state.languageSetupComplete = true;
+            localStorage.setItem('raagam_language_setup', 'true');
+          }
         }
-        showToast('Recovered UI — if you still see issues clear site storage from Settings.');
+        console.warn(`[UI recovery${hard ? ' HARD' : ''}] Forcing app visible`);
+        appEl.classList.remove('hidden');
+        if (splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 400); }
+        if (!appInitialized) {
+          try { setupEvents(); setupSearch(); setupLibrary(); loadHome(); } catch (_) {}
+        }
+        if (hard) showToast('App recovered — if issues persist, go to Settings → Clear Data');
       }
     } catch (e) {
-      console.warn('UI recovery check failed:', e);
+      console.warn('UI recovery failed:', e);
     }
-  }, 1500);
+  }
+  setTimeout(() => _uiRecovery(false), 1500);  // soft: only fires if no dialog visible
+  setTimeout(() => _uiRecovery(false), 4000);  // second soft attempt
+  setTimeout(() => _uiRecovery(true),  8000);  // hard: clears stuck dialogs, forces show
 });
