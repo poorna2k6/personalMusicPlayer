@@ -964,17 +964,32 @@ function getTimeOfDayContext() {
   return                         { label: 'Night',     icon: '🌙', queries: ['slow romantic night', 'soft lullaby soothing', 'chill lofi night'] };
 }
 
-// ===== P2/P3: Smart DJ + Vibe Arcs =====
+// ===== UNIFIED AUTO DJ ENGINE =====
+// Works in any mode — one tap, fully automatic, zero manual steps.
+// Regular player: intelligent queue + auto-crossfade.
+// DJ mixer: auto-fill decks + auto-mix (separate djMixer.toggleAutoDJ).
+
 const SMART_DJ_VIBES = {
-  auto:     { label: 'Auto (Time-based)', icon: '🕐', queries: null }, // uses getTimeOfDayContext
-  morning:  { label: 'Morning Raga',      icon: '🌅', queries: ['devotional morning', 'classical acoustic peaceful', 'bhakti soft'] },
-  focus:    { label: 'Focus Mode',        icon: '🎯', queries: ['instrumental focus', 'acoustic calm lofi', 'study concentration'] },
-  workout:  { label: 'Workout',           icon: '💪', queries: ['dance remix energetic', 'party beats fast', 'high energy songs'] },
-  party:    { label: 'Party Mode',        icon: '🎉', queries: ['party remix hits', 'dance floor peppy', 'upbeat dj songs'] },
-  chill:    { label: 'Chill',             icon: '😎', queries: ['chill lofi soft', 'mellow acoustic calm', 'relax songs slow'] },
-  romantic: { label: 'Romantic',          icon: '💕', queries: ['romantic love songs', 'pyar heart touching', 'love ballad'] },
-  winddown: { label: 'Wind Down',         icon: '🌙', queries: ['slow soothing night', 'soft lullaby peaceful', 'classical slow'] }
+  auto:     { label: 'Auto',         icon: '🕐', queries: null },           // time-based
+  morning:  { label: 'Morning Raga', icon: '🌅', queries: ['devotional morning', 'classical acoustic peaceful', 'bhakti soft'] },
+  focus:    { label: 'Focus',        icon: '🎯', queries: ['instrumental focus', 'acoustic calm lofi', 'study concentration'] },
+  workout:  { label: 'Workout',      icon: '💪', queries: ['dance remix energetic', 'party beats fast', 'high energy songs'] },
+  party:    { label: 'Party',        icon: '🎉', queries: ['party remix hits', 'dance floor peppy', 'upbeat dj songs'] },
+  chill:    { label: 'Chill',        icon: '😎', queries: ['chill lofi soft', 'mellow acoustic calm', 'relax songs slow'] },
+  romantic: { label: 'Romantic',     icon: '💕', queries: ['romantic love songs', 'pyar heart touching', 'love ballad'] },
+  winddown: { label: 'Wind Down',    icon: '🌙', queries: ['slow soothing night', 'soft lullaby peaceful', 'classical slow'] }
 };
+
+// Energy levels for progression-aware mixing (0=low → 3=peak)
+function getEnergyLevel(track) {
+  if (!track) return 1;
+  const text = `${getTrackName(track)} ${getAlbumName(track)} ${detectGenre(track)} ${detectMood(track)}`.toLowerCase();
+  if (/party|dance|remix|edm|fast beat|electronic|disco|bhangra|workout|energy/.test(text)) return 3;
+  if (/pop|folk|peppy|upbeat|happy|hip.?hop|bhangra/.test(text)) return 2;
+  if (/romantic|love|melody|soft|acoustic|light/.test(text)) return 1;
+  if (/classical|devotional|slow|sad|lullaby|bhakti|chill|lofi|sleep|night/.test(text)) return 0;
+  return 1;
+}
 
 function getSmartDJQueries() {
   const vibe = SMART_DJ_VIBES[state.smartDJVibe];
@@ -982,19 +997,80 @@ function getSmartDJQueries() {
   return vibe.queries;
 }
 
+// ── Main toggle: one tap = ON immediately, second tap = change vibe or OFF ──
 function toggleSmartDJ() {
-  state.smartDJEnabled = !state.smartDJEnabled;
-  localStorage.setItem('raagam_smartdj', state.smartDJEnabled ? 'true' : 'false');
-  updateSmartDJUI();
-  if (state.smartDJEnabled) {
-    showSmartDJVibePicker();
+  if (!state.smartDJEnabled) {
+    // FIRST TAP — start immediately, no dialog
+    state.smartDJEnabled = true;
+    localStorage.setItem('raagam_smartdj', 'true');
+    _activateAutoDJ();
   } else {
-    showToast('Smart DJ off');
-    analytics.trackFeatureUsage('smart_dj_off');
+    // ALREADY ON — show vibe picker to change vibe or stop
+    _showAutoDJVibeMenu();
   }
 }
 
-function showSmartDJVibePicker() {
+function _activateAutoDJ() {
+  const vibe = SMART_DJ_VIBES[state.smartDJVibe] || SMART_DJ_VIBES.auto;
+
+  // Save current crossfade so we can restore it on stop
+  state._prevCrossfade = state.crossfadeDuration;
+  if (state.crossfadeDuration < 5) setCrossfade(6); // ensure smooth transitions
+
+  // Enable gapless pre-buffering for seamless handoff
+  if (!state.gaplessEnabled) {
+    state.gaplessEnabled = true;
+    localStorage.setItem('raagam_gapless', 'true');
+    const gbtn = $('#settings-gapless');
+    if (gbtn) gbtn.textContent = 'On';
+  }
+
+  updateSmartDJUI();
+
+  const timeCtx = getTimeOfDayContext();
+  showToast(`🎧 Auto DJ ON · ${vibe.icon} ${vibe.label === 'Auto' ? timeCtx.label : vibe.label} · mixing...`);
+  analytics.trackFeatureUsage('auto_dj_on', { vibe: state.smartDJVibe });
+
+  if (!state.currentTrack) {
+    // Nothing playing — fetch songs and start
+    _autoDJBootstrap();
+  } else {
+    buildSmartDJQueue();
+  }
+}
+
+async function _autoDJBootstrap() {
+  // No current track → search, build queue, and play
+  const queries = getSmartDJQueries();
+  const lang = CONFIG.preferredLanguage || 'hindi';
+  const ld = CONFIG.supportedLanguages[lang];
+  const lk = ld?.keywords?.[0] || lang;
+  const q = `${lk} ${queries[0]}`;
+  showToast('Auto DJ: finding songs...');
+  try {
+    const results = await apiSearch(q, 15);
+    if (!results.length) { showToast('Auto DJ: no songs found. Try a different language.'); return; }
+    state.queue = results;
+    state.queueIndex = 0;
+    playSong(results[0], false);
+    renderQueue();
+  } catch(e) { console.warn('[Auto DJ bootstrap]', e); }
+}
+
+function stopAutoDJMode() {
+  state.smartDJEnabled = false;
+  localStorage.setItem('raagam_smartdj', 'false');
+  // Restore previous crossfade
+  if (typeof state._prevCrossfade === 'number') {
+    setCrossfade(state._prevCrossfade);
+    state._prevCrossfade = undefined;
+  }
+  updateSmartDJUI();
+  showToast('Auto DJ OFF');
+  analytics.trackFeatureUsage('auto_dj_off');
+}
+
+function _showAutoDJVibeMenu() {
   document.querySelector('.smart-dj-picker')?.remove();
   const picker = document.createElement('div');
   picker.className = 'smart-dj-picker';
@@ -1002,7 +1078,10 @@ function showSmartDJVibePicker() {
     <div class="sdj-backdrop"></div>
     <div class="sdj-panel">
       <div class="sdj-header">
-        <h3>🎧 Smart DJ — Choose Your Vibe</h3>
+        <div>
+          <h3>🎧 Auto DJ — Active</h3>
+          <p class="sdj-subhead">Choose a vibe or turn off</p>
+        </div>
         <button class="sdj-close">✕</button>
       </div>
       <div class="sdj-vibes">
@@ -1012,9 +1091,11 @@ function showSmartDJVibePicker() {
             <span>${v.label}</span>
           </button>`).join('')}
       </div>
-      <button class="sdj-start">Start Smart DJ</button>
+      <button class="sdj-start">Apply Vibe</button>
+      <button class="sdj-stop">Turn Off Auto DJ</button>
     </div>`;
   document.body.appendChild(picker);
+
   picker.querySelector('.sdj-backdrop').addEventListener('click', () => picker.remove());
   picker.querySelector('.sdj-close').addEventListener('click', () => picker.remove());
   picker.querySelectorAll('.sdj-vibe-btn').forEach(btn => {
@@ -1028,14 +1109,21 @@ function showSmartDJVibePicker() {
   picker.querySelector('.sdj-start').addEventListener('click', () => {
     picker.remove();
     const vibe = SMART_DJ_VIBES[state.smartDJVibe];
-    showToast(`Smart DJ ON — ${vibe.icon} ${vibe.label}`);
-    analytics.trackFeatureUsage('smart_dj_on', { vibe: state.smartDJVibe });
-    if (state.currentTrack) buildSmartDJQueue();
+    showToast(`Auto DJ: switched to ${vibe.icon} ${vibe.label}`);
+    buildSmartDJQueue();
+  });
+  picker.querySelector('.sdj-stop').addEventListener('click', () => {
+    picker.remove();
+    stopAutoDJMode();
   });
 }
 
 function updateSmartDJUI() {
-  $('#np-smartdj-btn')?.classList.toggle('active', state.smartDJEnabled);
+  const active = state.smartDJEnabled;
+  $$('.auto-dj-btn').forEach(btn => btn.classList.toggle('active', active));
+  // Mini player badge
+  const badge = $('#mini-autodj-badge');
+  if (badge) badge.style.display = active ? 'flex' : 'none';
 }
 
 async function buildSmartDJQueue() {
@@ -1050,22 +1138,39 @@ async function buildSmartDJQueue() {
       const ld = CONFIG.supportedLanguages[lang];
       if (ld) searchQuery = `${ld.keywords[0]} ${query}`;
     }
-    const results = await apiSearch(searchQuery, 20);
+
+    const results = await apiSearch(searchQuery, 25);
     if (!results.length) return;
-    const playedIds = new Set(state.playedTracks.map(t => t.id));
-    const fresh = results.filter(t => !playedIds.has(t.id));
-    const recs = getRecommendedTracks(state.currentTrack, fresh.length ? fresh : results, state.playedTracks, 6);
-    if (!recs.length) return;
+
+    const playedIds  = new Set(state.playedTracks.map(t => t.id));
     const existingIds = new Set(state.queue.map(t => t.id));
-    const newTracks = recs.filter(t => !existingIds.has(t.id));
-    if (newTracks.length > 0) {
-      state.queue.splice(state.queueIndex + 1, 0, ...newTracks);
-      renderQueue();
-      const vibe = SMART_DJ_VIBES[state.smartDJVibe];
-      showToast(`Smart DJ: ${newTracks.length} tracks queued (${vibe?.icon || ''} ${vibe?.label || state.smartDJVibe})`);
-    }
+    const fresh = results.filter(t => !playedIds.has(t.id) && !existingIds.has(t.id));
+    const pool  = fresh.length >= 5 ? fresh : results.filter(t => !existingIds.has(t.id));
+    if (!pool.length) return;
+
+    // Score using similarity + energy matching
+    const curTrack = state.currentTrack;
+    const curEnergy = getEnergyLevel(curTrack);
+    const scored = pool.map(t => {
+      let s = curTrack
+        ? calculateSimilarityScore(curTrack, t, detectLanguage(curTrack), detectGenre(curTrack))
+        : 0;
+      // Prefer tracks within ±1 energy level of current
+      const energyDiff = Math.abs(getEnergyLevel(t) - curEnergy);
+      s += energyDiff === 0 ? 20 : energyDiff === 1 ? 10 : 0;
+      return { ...t, _score: s };
+    }).sort((a, b) => b._score - a._score);
+
+    // Take top 6 tracks
+    const picks = scored.slice(0, 6);
+    state.queue.splice(state.queueIndex + 1, 0, ...picks);
+    renderQueue();
+
+    const vibe = SMART_DJ_VIBES[state.smartDJVibe];
+    const timeLabel = vibe?.label === 'Auto' ? getTimeOfDayContext().label : vibe?.label;
+    showToast(`Auto DJ: ${picks.length} tracks queued · ${vibe?.icon || '🎧'} ${timeLabel}`);
   } catch(e) {
-    console.warn('[Smart DJ]', e);
+    console.warn('[Auto DJ]', e);
   } finally {
     state.smartDJBusy = false;
   }
@@ -6671,9 +6776,11 @@ function setupEvents() {
   const npVisualizerBtn = $('#np-visualizer-btn');
   if (npVisualizerBtn) npVisualizerBtn.addEventListener('click', toggleVisualizer);
 
-  // P2: Smart DJ button
-  const npSmartDJBtn = $('#np-smartdj-btn');
-  if (npSmartDJBtn) npSmartDJBtn.addEventListener('click', toggleSmartDJ);
+  // Auto DJ — unified handler for all buttons (mini player + now playing)
+  $$('.auto-dj-btn').forEach(btn => btn.addEventListener('click', toggleSmartDJ));
+  // Mini player Auto DJ button specifically wired (for buttons added later)
+  const miniAutoDJ = $('#mini-autodj');
+  if (miniAutoDJ) miniAutoDJ.addEventListener('click', (e) => { e.stopPropagation(); toggleSmartDJ(); });
   updateSmartDJUI();
 
   // P4: Gapless Playback toggle

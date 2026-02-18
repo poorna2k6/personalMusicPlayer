@@ -3248,3 +3248,52 @@ a { color: inherit; text-decoration: none; }
 /* ===== Feature Tour — New badges ===== */
 .ft-card-new { border-left: 3px solid #1DB954; }
 .ft-badge-new { display: inline-block; background: linear-gradient(135deg,#1DB954,#06b6d4); color: #000; font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 8px; vertical-align: middle; margin-left: 6px; letter-spacing: 0.5px; text-transform: uppercase; }
+
+/* ===== Unified Auto DJ Button ===== */
+.auto-dj-btn { position: relative; transition: color 0.2s, transform 0.2s; }
+.auto-dj-btn.active { color: #1DB954 !important; }
+.auto-dj-btn.active svg { filter: drop-shadow(0 0 6px #1DB954); animation: autodj-pulse 2s ease-in-out infinite; }
+@keyframes autodj-pulse {
+  0%, 100% { filter: drop-shadow(0 0 4px #1DB954); }
+  50%       { filter: drop-shadow(0 0 10px #1DB954) drop-shadow(0 0 20px #1DB95460); }
+}
+
+/* Mini player Auto DJ button */
+.mini-autodj-btn { color: var(--text-dim); padding: 4px; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.mini-autodj-btn.active { color: #1DB954; }
+
+/* AUTO badge on mini player */
+.mini-autodj-badge {
+  position: absolute;
+  top: -6px; right: -6px;
+  background: linear-gradient(135deg, #1DB954, #06b6d4);
+  color: #000;
+  font-size: 7px;
+  font-weight: 900;
+  padding: 2px 4px;
+  border-radius: 6px;
+  letter-spacing: 0.3px;
+  animation: badge-blink 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes badge-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+/* Auto DJ vibe menu — stop button */
+.sdj-stop {
+  width: 100%;
+  padding: 12px;
+  margin-top: 8px;
+  background: rgba(255, 60, 60, 0.12);
+  border: 1px solid rgba(255, 60, 60, 0.3);
+  border-radius: 50px;
+  color: #ff5252;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.sdj-stop:hover { background: rgba(255, 60, 60, 0.22); }
+.sdj-subhead { font-size: 12px; color: #b3b3b3; margin-top: 2px; }
