@@ -1997,6 +1997,49 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 0 25px rgba(var(--deck-color-rgb, 0,240,255), 0.2), inset 0 1px 0 rgba(var(--deck-color-rgb, 0,240,255), 0.15);
 }
 
+/* Playing deck: bright glow + pulsing border when Auto DJ is mixing on this deck */
+.dj-deck.dj-deck-playing {
+  border-color: var(--deck-color, #00f0ff);
+  box-shadow:
+    0 0 0 2px rgba(var(--deck-color-rgb, 0,240,255), 0.4),
+    0 0 30px rgba(var(--deck-color-rgb, 0,240,255), 0.35),
+    0 0 60px rgba(var(--deck-color-rgb, 0,240,255), 0.15),
+    inset 0 1px 0 rgba(var(--deck-color-rgb, 0,240,255), 0.2);
+  animation: deck-glow-pulse 2s ease-in-out infinite;
+}
+@keyframes deck-glow-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px rgba(var(--deck-color-rgb, 0,240,255), 0.4),
+      0 0 30px rgba(var(--deck-color-rgb, 0,240,255), 0.35),
+      0 0 60px rgba(var(--deck-color-rgb, 0,240,255), 0.15),
+      inset 0 1px 0 rgba(var(--deck-color-rgb, 0,240,255), 0.2);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgba(var(--deck-color-rgb, 0,240,255), 0.6),
+      0 0 45px rgba(var(--deck-color-rgb, 0,240,255), 0.5),
+      0 0 80px rgba(var(--deck-color-rgb, 0,240,255), 0.25),
+      inset 0 1px 0 rgba(var(--deck-color-rgb, 0,240,255), 0.3);
+  }
+}
+/* Deck number badge pulses when that deck is playing */
+.dj-deck.dj-deck-playing .dj-deck-number {
+  animation: deck-num-pulse 2s ease-in-out infinite;
+}
+@keyframes deck-num-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.75; transform: scale(1.08); }
+}
+/* Waveform canvas glows on the playing deck */
+.dj-deck.dj-deck-playing .dj-waveform-canvas {
+  filter: drop-shadow(0 0 6px rgba(var(--deck-color-rgb, 0,240,255), 0.5));
+}
+/* EQ rotary knob fill glows on the playing deck */
+.dj-deck.dj-deck-playing .dj-rotary-fill {
+  filter: drop-shadow(0 0 3px rgba(var(--deck-color-rgb, 0,240,255), 0.8));
+}
+
 /* Deck Header */
 .dj-deck-header {
   display: flex;

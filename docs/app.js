@@ -1884,6 +1884,8 @@ function playSong(track, addToQueue = true) {
       source: 'user_click' // or 'auto_play', 'queue_next', etc.
     });
   }).catch(e => {
+    // AbortError: previous play() was interrupted by a new src assignment — not a real error
+    if (e.name === 'AbortError') return;
     console.error('Playback error:', e);
     showToast('Could not play this track');
     analytics.trackMusicAction('play_error', { track: track.id, error: e.message });
@@ -4269,6 +4271,7 @@ const djMixer = {
     deck.audio.play().then(() => {
       deck.isPlaying = true;
       this.updateDeckPlayBtn(deck);
+      this._updateDeckPlayingUI(deck);
       this.startWaveform(deck);
       // Start auto EQ if globally enabled
       if (state.djAutoEQGlobal && !deck._autoEQInterval) this.startAutoEQ(deck);
@@ -4281,6 +4284,7 @@ const djMixer = {
     deck.audio.pause();
     deck.isPlaying = false;
     this.updateDeckPlayBtn(deck);
+    this._updateDeckPlayingUI(deck);
     // Stop auto EQ on pause
     if (deck._autoEQInterval) this.stopAutoEQ(deck);
   },
@@ -4292,6 +4296,7 @@ const djMixer = {
     deck.audio.currentTime = 0;
     deck.isPlaying = false;
     this.updateDeckPlayBtn(deck);
+    this._updateDeckPlayingUI(deck);
   },
 
   toggleDeck(deckId) {
@@ -4827,97 +4832,182 @@ const djMixer = {
   },
 
   async _autoDJTick() {
-    if (!state.djAutoDJEnabled) return;
-    const decks = state.djDecks;
-    const playingDecks = decks.filter(d => d.isPlaying && d.track);
-    const stoppedDecks = decks.filter(d => !d.isPlaying && d.track);
-    const emptyDecks = decks.filter(d => !d.track);
+    if (!state.djAutoDJEnabled || this._tickBusy) return;
+    this._tickBusy = true;
+    try {
+      const decks = state.djDecks;
+      const playingDecks = decks.filter(d => d.isPlaying && d.track);
+      const emptyDecks   = decks.filter(d => !d.track);
 
-    // Auto-load empty decks
-    for (const ed of emptyDecks) {
-      await this.autoLoadNextSong(ed);
-    }
+      // Auto-load any empty decks (don't await — do it in background)
+      emptyDecks.forEach(ed => {
+        if (!ed._loading) {
+          ed._loading = true;
+          this.autoLoadNextSong(ed).finally(() => { ed._loading = false; });
+        }
+      });
 
-    if (playingDecks.length === 0) {
-      // Nothing playing — start the first loaded deck
-      const first = decks.find(d => d.track);
-      if (first) this.playDeck(first.id);
-      return;
-    }
+      if (playingDecks.length === 0) {
+        const first = decks.find(d => d.track);
+        if (first) this.playDeck(first.id);
+        return;
+      }
 
-    // Check each playing deck for transition point
-    for (const deck of playingDecks) {
-      if (!deck.audio.duration) continue;
-      const remaining = deck.audio.duration - deck.audio.currentTime;
-      // When 10 seconds remain, prepare next deck
-      if (remaining <= 10 && remaining > 9) {
-        // Find next deck to transition to
-        let nextDeck = stoppedDecks.find(d => d.id !== deck.id && d.track);
-        if (!nextDeck) {
-          // Load a new song on an idle deck
-          const idle = decks.find(d => d.id !== deck.id && !d.isPlaying);
-          if (idle) {
-            await this.autoLoadNextSong(idle);
-            nextDeck = idle;
+      for (const deck of playingDecks) {
+        if (!deck.audio.duration) continue;
+        const remaining = deck.audio.duration - deck.audio.currentTime;
+
+        // ── Transition trigger: within 12s, fire only ONCE per track ──
+        if (remaining <= 12 && !deck.transitionTriggered) {
+          deck.transitionTriggered = true;
+
+          // Find best next deck (loaded & not playing)
+          let nextDeck = decks.find(d => d.id !== deck.id && d.track && !d.isPlaying);
+          if (!nextDeck) {
+            // Find idle deck and load a song onto it
+            const idle = decks.find(d => d.id !== deck.id && !d.isPlaying && !d._loading);
+            if (idle) {
+              idle._loading = true;
+              nextDeck = await this.autoLoadNextSong(idle).then(t => { idle._loading = false; return t ? idle : null; });
+            }
+          }
+          if (nextDeck && nextDeck.track && !nextDeck.isPlaying) {
+            this.playDeck(nextDeck.id);
+            this._performIntelligentTransition(deck, nextDeck);
+            showToast(`Auto DJ: mixing → Deck ${nextDeck.idx + 1}`);
           }
         }
-        if (nextDeck && nextDeck.track && !nextDeck.isPlaying) {
-          this.playDeck(nextDeck.id);
 
-          // Always crossfade — move crossfader toward the incoming deck
-          // If decks are on A/B, use the crossfader; otherwise do a direct volume fade
-          const deckIdx  = deck.idx;
-          const nextIdx  = nextDeck.idx;
-          const aIdx = state.djCrossfaderAssign.a;
-          const bIdx = state.djCrossfaderAssign.b;
-          const onCrossfader = (deckIdx === aIdx && nextIdx === bIdx) || (deckIdx === bIdx && nextIdx === aIdx);
-
-          if (onCrossfader) {
-            // Hardware crossfader sweep (8s smoothstep)
-            const targetPos = (nextIdx === bIdx) ? 100 : 0;
-            const startPos  = state.djCrossfaderPos;
-            const steps = 80;
-            let step = 0;
-            const interval = setInterval(() => {
-              step++;
-              const eased = (s => s * s * (3 - 2 * s))(step / steps); // smoothstep
-              this.applyCrossfader(startPos + (targetPos - startPos) * eased);
-              const slider = $('#dj-crossfader');
-              if (slider) slider.value = state.djCrossfaderPos;
-              if (step >= steps) clearInterval(interval);
-            }, 100);
-          } else {
-            // Direct volume fade: outgoing fades out, incoming fades in over 8s
-            const FADE_MS  = 8000;
-            const STEPS    = 80;
-            const INTERVAL = FADE_MS / STEPS;
-            let step = 0;
-            const startVolOut = deck.audio.volume;
-            const startVolIn  = 0;
-            nextDeck.audio.volume = 0;
-            const interval = setInterval(() => {
-              step++;
-              const eased = (s => s * s * (3 - 2 * s))(step / STEPS);
-              deck.audio.volume     = startVolOut * (1 - eased);
-              nextDeck.audio.volume = startVolOut * eased;
-              if (step >= STEPS) {
-                clearInterval(interval);
-                deck.audio.volume     = startVolOut; // restore for next use
-                nextDeck.audio.volume = startVolOut;
-              }
-            }, INTERVAL);
+        // ── Song ended: reset flag, eject, auto-load fresh song ──
+        if (remaining <= 0.5) {
+          deck.transitionTriggered = false;
+          deck.isPlaying = false;
+          this.updateDeckPlayBtn(deck);
+          this._updateDeckPlayingUI(deck);
+          if (!deck._loading) {
+            deck._loading = true;
+            this.autoLoadNextSong(deck).finally(() => { deck._loading = false; });
           }
-          showToast(`Auto DJ: mixing to Deck ${nextDeck.idx + 1}`);
         }
       }
-      // When song ends, stop it and load next
-      if (remaining <= 0.5) {
-        deck.isPlaying = false;
-        this.updateDeckPlayBtn(deck);
-        // Auto-load a new song for this deck
-        this.autoLoadNextSong(deck);
-      }
+    } finally {
+      this._tickBusy = false;
     }
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // AUTO DJ — Visual Transitions & Deck Glow
+  // ═══════════════════════════════════════════════════════════════
+
+  // Smoothly interpolate an EQ band (bass/mid/treble) from fromVal → toVal
+  // Updates both Web Audio gain AND the rotary knob + slider visuals in the DJ panel
+  _animateKnob(deck, band, fromVal, toVal, durationMs) {
+    const steps = Math.max(1, Math.floor(durationMs / 50));
+    let step = 0;
+    const min = -12, range = 24;
+    const circumference = 175.93;
+    const deckEl = document.getElementById(`dj-deck-${deck.id}`);
+    const iv = setInterval(() => {
+      step++;
+      const t = step / steps;
+      // Cubic ease-in-out
+      const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const val = Math.round(fromVal + (toVal - fromVal) * eased);
+      // Update Web Audio gain
+      if (deck[band]) deck[band].gain.value = val;
+      // Update rotary knob visual
+      const knob = deckEl?.querySelector(`.dj-rotary[data-eq="${band}"]`);
+      if (knob) {
+        const norm = (val - min) / range;
+        const offset = circumference * (1 - norm * 0.75);
+        const angleDeg = -135 + norm * 270;
+        const fill = knob.querySelector('.dj-rotary-fill');
+        const ptr = knob.querySelector('.dj-rotary-pointer');
+        const vl = knob.querySelector('.dj-rotary-val');
+        if (fill) fill.style.strokeDashoffset = offset;
+        if (ptr) { ptr.style.transform = `rotate(${angleDeg}deg)`; ptr.style.transformOrigin = '32px 32px'; }
+        if (vl) vl.textContent = val > 0 ? `+${val}` : `${val}`;
+        knob.dataset.value = val;
+      }
+      // Update EQ slider and its label (slider mode)
+      const slider = deckEl?.querySelector(`.dj-eq-slider[data-eq="${band}"]`);
+      if (slider) {
+        slider.value = val;
+        const label = deckEl?.querySelector(`.dj-seq-val[data-eq="${band}"]`);
+        if (label) label.textContent = val > 0 ? `+${val}` : `${val}`;
+      }
+      if (step >= steps) clearInterval(iv);
+    }, 50);
+    return iv;
+  },
+
+  // Real DJ transition: bass kill on outgoing → crossfade → bass bring-in on incoming
+  _performIntelligentTransition(outDeck, nextDeck) {
+    const outIdx = state.djDecks.indexOf(outDeck);
+    const nextIdx = state.djDecks.indexOf(nextDeck);
+    const currentBass = outDeck.bass?.gain?.value ?? 0;
+
+    // 1. Kill bass on outgoing deck over 3s (visual knob animates down)
+    this._animateKnob(outDeck, 'bass', currentBass, -12, 3000);
+
+    // 2. Pre-cut incoming deck's bass so the mix starts clean
+    if (nextDeck.bass) nextDeck.bass.gain.value = -12;
+    const incomingEl = document.getElementById(`dj-deck-${nextDeck.id}`);
+    if (incomingEl) this._syncRotaryFromSlider(incomingEl, 'bass', -12);
+
+    // 3. Bring in incoming deck's bass after 2s delay (visual knob animates up)
+    setTimeout(() => {
+      this._animateKnob(nextDeck, 'bass', -12, 0, 3000);
+    }, 2000);
+
+    // 4. Crossfader sweep OR direct volume fade
+    const assignA = state.djCrossfaderAssign.a;
+    const assignB = state.djCrossfaderAssign.b;
+    const onCrossfader = (outIdx === assignA && nextIdx === assignB) ||
+                         (outIdx === assignB && nextIdx === assignA);
+    if (onCrossfader) {
+      // Sweep hardware crossfader to next-deck side over 4s
+      const targetPos = nextIdx === assignB ? 100 : 0;
+      const startPos = state.djCrossfaderPos ?? 50;
+      const cfSteps = 80;
+      let cfStep = 0;
+      const cfIv = setInterval(() => {
+        cfStep++;
+        const pos = Math.round(startPos + (targetPos - startPos) * (cfStep / cfSteps));
+        this.applyCrossfader(pos);
+        const slider = $('#dj-crossfader');
+        if (slider) slider.value = pos;
+        if (cfStep >= cfSteps) clearInterval(cfIv);
+      }, 50);
+    } else {
+      // Fade out outgoing deck volume over 4s
+      const startVol = outDeck.volumeGain?.gain?.value ?? 0.8;
+      const fadeSteps = 80;
+      let fadeStep = 0;
+      const fadeIv = setInterval(() => {
+        fadeStep++;
+        const t = fadeStep / fadeSteps;
+        if (outDeck.volumeGain) outDeck.volumeGain.gain.value = Math.max(0, startVol * (1 - t));
+        if (fadeStep >= fadeSteps) {
+          clearInterval(fadeIv);
+          // Restore volume for next auto-load cycle
+          setTimeout(() => {
+            if (outDeck.volumeGain) outDeck.volumeGain.gain.value = 0.8;
+          }, 2000);
+        }
+      }, 50);
+    }
+
+    // 5. Refresh deck glow states
+    this._updateDeckPlayingUI(outDeck);
+    this._updateDeckPlayingUI(nextDeck);
+  },
+
+  // Toggle the .dj-deck-playing CSS class (glowing border + pulsing label) on a deck card
+  _updateDeckPlayingUI(deck) {
+    const el = document.getElementById(`dj-deck-${deck.id}`);
+    if (!el) return;
+    el.classList.toggle('dj-deck-playing', !!deck.isPlaying);
   },
 
   // Enable auto-load-next for a specific deck with optional delay timer
