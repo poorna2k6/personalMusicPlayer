@@ -4595,32 +4595,73 @@ const djMixer = {
     }
   },
 
-  // === Auto-Load Next Song for a specific deck ===
+  // === Intelligent Auto-Load Next Song ===
+  // Uses genre, mood, language, and skip signals to pick the best next track
   async autoLoadNextSong(deck) {
-    if (!deck.track) return;
-    const lang = state.djAutoFillLang || 'all';
-    const currentArtist = getArtistName(deck.track);
-    const currentTitle = getTrackName(deck.track);
-    // Search for similar songs
-    const themes = ['songs', 'hits', 'latest', 'best', 'top'];
-    const theme = themes[Math.floor(Math.random() * themes.length)];
-    let query = currentArtist ? `${currentArtist} ${theme}` : `${currentTitle} ${theme}`;
-    if (lang !== 'all') {
-      const ld = CONFIG.supportedLanguages[lang];
-      if (ld) query = `${ld.keywords[0]} ${query}`;
+    // Find a reference track — prefer the currently playing deck, else this deck
+    const playingDeck = state.djDecks.find(d => d.isPlaying && d.track);
+    const refTrack = playingDeck?.track || deck?.track || null;
+
+    const lang = state.djAutoFillLang || CONFIG.preferredLanguage || 'all';
+    const ld = lang !== 'all' ? CONFIG.supportedLanguages[lang] : null;
+    const langKeyword = ld?.keywords?.[0] || '';
+
+    // Build an intelligent query from the reference track's genre + mood
+    let queries = [];
+    if (refTrack) {
+      const genre  = detectGenre(refTrack);
+      const mood   = detectMood(refTrack);
+      const artist = getArtistName(refTrack);
+      const title  = getTrackName(refTrack);
+
+      // Primary: same genre + language
+      if (genre !== 'general') queries.push(`${langKeyword} ${genre} songs`);
+      // Secondary: mood-based
+      if (mood !== 'general') queries.push(`${langKeyword} ${mood} songs`);
+      // Tertiary: same artist for variety
+      if (artist) queries.push(`${artist} songs`);
+      // Fallback: title keywords
+      queries.push(`${langKeyword} ${title.split(' ').slice(0, 2).join(' ')} similar`);
     }
+
+    // Also inject Smart DJ vibe query if Smart DJ is active
+    if (state.smartDJEnabled) {
+      const vibeQueries = getSmartDJQueries();
+      queries.unshift(`${langKeyword} ${vibeQueries[Math.floor(Math.random() * vibeQueries.length)]}`);
+    }
+
+    // Time-of-day fallback
+    if (queries.length === 0) {
+      const timeQ = getTimeOfDayContext().queries;
+      queries.push(`${langKeyword} ${timeQ[0]}`);
+    }
+
+    // Collect all used IDs to avoid duplicates across decks
+    const usedIds = new Set(state.djDecks.map(d => d.track?.id).filter(Boolean));
+
     try {
-      const tracks = await apiSearch(query, 20);
-      const usedIds = new Set();
-      state.djDecks.forEach(d => { if (d.track?.id) usedIds.add(d.track.id); });
-      const available = tracks.filter(t => !usedIds.has(t.id));
-      if (available.length > 0) {
-        const track = available[Math.floor(Math.random() * available.length)];
-        this.loadTrack(deck.id, track);
-        return track;
+      // Try each query until we get usable results
+      for (const q of queries) {
+        const tracks = await apiSearch(q.trim(), 20);
+        if (!tracks.length) continue;
+
+        const available = tracks.filter(t => !usedIds.has(t.id));
+        if (!available.length) continue;
+
+        // Score each candidate using the full similarity scorer (includes skip penalties)
+        const scored = refTrack
+          ? available
+              .map(t => ({ ...t, _score: calculateSimilarityScore(refTrack, t, detectLanguage(refTrack), detectGenre(refTrack)) }))
+              .sort((a, b) => b._score - a._score)
+          : available;
+
+        const best = scored[0];
+        this.loadTrack(deck.id, best);
+        console.log(`[Auto DJ] Loaded: ${getTrackName(best)} (score: ${best._score ?? 'n/a'})`);
+        return best;
       }
     } catch (e) {
-      console.warn('Auto-load next failed:', e);
+      console.warn('[Auto DJ] autoLoadNextSong failed:', e);
     }
     return null;
   },
@@ -4633,7 +4674,6 @@ const djMixer = {
     if (btn) btn.classList.toggle('active', state.djAutoDJEnabled);
     if (state.djAutoDJEnabled) {
       this.startAutoDJ();
-      showToast('🎧 Auto DJ ON — sit back and enjoy!');
     } else {
       this.stopAutoDJ();
       showToast('Auto DJ OFF');
@@ -4642,22 +4682,36 @@ const djMixer = {
 
   startAutoDJ() {
     if (state.djAutoDJInterval) clearInterval(state.djAutoDJInterval);
-    // Ensure at least 2 decks have songs
+
     const loadedDecks = state.djDecks.filter(d => d.track);
-    if (loadedDecks.length < 1) {
-      showToast('Load at least 1 song first, or use Auto-Fill');
-      state.djAutoDJEnabled = false;
-      const btn = $('#dj-autodj-toggle');
-      if (btn) btn.classList.remove('active');
+    if (loadedDecks.length === 0) {
+      // Auto-fill decks first, then start
+      showToast('Auto DJ: filling decks...');
+      this.autoFillDecks().then(() => {
+        const filled = state.djDecks.filter(d => d.track);
+        if (filled.length === 0) {
+          showToast('Auto DJ: could not load songs. Check connection.');
+          state.djAutoDJEnabled = false;
+          $('#dj-autodj-toggle')?.classList.remove('active');
+          return;
+        }
+        this._beginAutoDJPlayback();
+      });
       return;
     }
+    this._beginAutoDJPlayback();
+  },
+
+  _beginAutoDJPlayback() {
     // Start playing first deck if nothing is playing
     const playingDecks = state.djDecks.filter(d => d.isPlaying);
-    if (playingDecks.length === 0 && loadedDecks.length > 0) {
-      this.playDeck(loadedDecks[0].id);
+    if (playingDecks.length === 0) {
+      const first = state.djDecks.find(d => d.track);
+      if (first) this.playDeck(first.id);
     }
     // Monitor every second
     state.djAutoDJInterval = setInterval(() => this._autoDJTick(), 1000);
+    showToast('🎧 Auto DJ ON — sit back and enjoy!');
   },
 
   stopAutoDJ() {
@@ -4704,26 +4758,49 @@ const djMixer = {
         }
         if (nextDeck && nextDeck.track && !nextDeck.isPlaying) {
           this.playDeck(nextDeck.id);
-          // Smooth crossfade over 8 seconds
-          const deckIdx = deck.idx;
-          const nextIdx = nextDeck.idx;
+
+          // Always crossfade — move crossfader toward the incoming deck
+          // If decks are on A/B, use the crossfader; otherwise do a direct volume fade
+          const deckIdx  = deck.idx;
+          const nextIdx  = nextDeck.idx;
           const aIdx = state.djCrossfaderAssign.a;
           const bIdx = state.djCrossfaderAssign.b;
-          if ((deckIdx === aIdx && nextIdx === bIdx) || (deckIdx === bIdx && nextIdx === aIdx)) {
+          const onCrossfader = (deckIdx === aIdx && nextIdx === bIdx) || (deckIdx === bIdx && nextIdx === aIdx);
+
+          if (onCrossfader) {
+            // Hardware crossfader sweep (8s smoothstep)
             const targetPos = (nextIdx === bIdx) ? 100 : 0;
-            const startPos = state.djCrossfaderPos;
+            const startPos  = state.djCrossfaderPos;
             const steps = 80;
             let step = 0;
             const interval = setInterval(() => {
               step++;
-              const progress = step / steps;
-              const eased = progress * progress * (3 - 2 * progress); // smoothstep
-              const pos = startPos + (targetPos - startPos) * eased;
-              this.applyCrossfader(pos);
+              const eased = (s => s * s * (3 - 2 * s))(step / steps); // smoothstep
+              this.applyCrossfader(startPos + (targetPos - startPos) * eased);
               const slider = $('#dj-crossfader');
-              if (slider) slider.value = pos;
+              if (slider) slider.value = state.djCrossfaderPos;
               if (step >= steps) clearInterval(interval);
             }, 100);
+          } else {
+            // Direct volume fade: outgoing fades out, incoming fades in over 8s
+            const FADE_MS  = 8000;
+            const STEPS    = 80;
+            const INTERVAL = FADE_MS / STEPS;
+            let step = 0;
+            const startVolOut = deck.audio.volume;
+            const startVolIn  = 0;
+            nextDeck.audio.volume = 0;
+            const interval = setInterval(() => {
+              step++;
+              const eased = (s => s * s * (3 - 2 * s))(step / STEPS);
+              deck.audio.volume     = startVolOut * (1 - eased);
+              nextDeck.audio.volume = startVolOut * eased;
+              if (step >= STEPS) {
+                clearInterval(interval);
+                deck.audio.volume     = startVolOut; // restore for next use
+                nextDeck.audio.volume = startVolOut;
+              }
+            }, INTERVAL);
           }
           showToast(`Auto DJ: mixing to Deck ${nextDeck.idx + 1}`);
         }
