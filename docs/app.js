@@ -6818,13 +6818,13 @@ function showFeatureTour() {
           </div>
         </div>
 
-        <div class="ft-category">📱 v3.8 — 19 Feb 2026</div>
+        <div class="ft-category">📱 v3.9 — 19 Feb 2026</div>
 
         <div class="ft-card ft-card-new">
           <div class="ft-card-icon">☁️</div>
           <div class="ft-card-info">
-            <h4>Cross-Device Cloud Sync <span class="ft-badge-new">NEW</span></h4>
-            <p>Your liked songs, playlists and history now sync automatically across all your devices. Uses Firebase — pre-configured and ready. Settings → Cloud Sync to see status or pull manually.</p>
+            <h4>Automatic Cross-Device Sync <span class="ft-badge-new">NEW</span></h4>
+            <p>Just enter your email or phone once in your profile — your liked songs, playlists and history sync silently across all your devices. No setup, no passwords, no configuration needed.</p>
           </div>
         </div>
 
@@ -6873,7 +6873,7 @@ function showFeatureTour() {
   document.body.appendChild(overlay);
 
   // Mark as seen
-  localStorage.setItem('raagam_feature_tour_v38', 'true');
+  localStorage.setItem('raagam_feature_tour_v39', 'true');
 
   // Close on backdrop click
   overlay.addEventListener('click', (e) => {
@@ -7340,8 +7340,7 @@ function openSettings() {
   if (settingsLang) settingsLang.value = CONFIG.preferredLanguage || 'hindi';
   updateHealthStatusUI();
   updateSleepTimerUI();
-  // Inject cloud sync + backup sections if not already present (idempotent calls)
-  _initCloudSyncUI();
+  // Inject profile backup section if not already present (idempotent)
   _initProfileBackupUI();
   // Update EQ and Speed labels in settings
   const settingsEq = $('#settings-eq');
@@ -8043,6 +8042,10 @@ function showProfileDialog() {
     analytics.trackEvent('profile_created', { hasEmail: !!emailValid, hasPhone: !!phoneValid, language: lang });
 
     autoBackup.schedule();
+    // Auto-sync to cloud silently — no user action needed
+    setTimeout(() => {
+      cloudSync.mergeFromCloud().then(() => cloudSync.push()).catch(() => {});
+    }, 2000);
 
     // Request persistent storage so iOS doesn't purge this data after 7 days
     navigator.storage?.persist?.().then(granted => {
@@ -8151,7 +8154,7 @@ function init() {
     setupThemePicker();
 
     // Show feature tour for first-time users (after a short delay so UI loads)
-    if (!localStorage.getItem('raagam_feature_tour_v38')) {
+    if (!localStorage.getItem('raagam_feature_tour_v39')) {
       setTimeout(() => showFeatureTour(), 1200);
     }
 
@@ -8732,120 +8735,25 @@ const cloudSync = {
     }
 
     _updateCloudSyncStatus('synced');
-    showToast(changed ? 'Cloud sync: data merged from other device' : 'Cloud sync: up to date');
+    if (changed) showToast('Cloud sync: your data restored from another device');
     return true;
   },
 };
 
 function _updateCloudSyncStatus(status, detail) {
-  const el = document.getElementById('cloud-sync-status');
-  if (!el) return;
-  const map = {
-    synced:  { text: 'Synced', color: '#1DB954' },
-    syncing: { text: 'Syncing...', color: '#f59e0b' },
-    error:   { text: `Error: ${detail || 'check URL/rules'}`, color: '#ff5252' },
-    idle:    { text: 'Not configured', color: '#888' },
-  };
-  const s = map[status] || map.idle;
-  el.textContent = s.text;
-  el.style.color = s.color;
+  // Silent — no visible UI element; log to console only
+  const labels = { synced: 'Synced', syncing: 'Syncing…', error: `Error: ${detail || 'check rules'}`, idle: 'Idle' };
+  console.log('[CloudSync]', labels[status] || status);
 }
 
 // Default Firebase URL — pre-configured for this app
 const _DEFAULT_CLOUD_URL = 'https://raaga-db-default-rtdb.firebaseio.com';
 
-// Injected into Settings panel — Cloud Sync section
+// Silently configure default Firebase URL — no visible UI, sync is fully automatic
 function _initCloudSyncUI() {
-  const panel = $('#settings-panel');
-  if (!panel || document.getElementById('cloud-sync-section')) return;
-
-  // Auto-save default Firebase URL on first load if not already configured
   if (!localStorage.getItem('raagam_cloud_url')) {
     localStorage.setItem('raagam_cloud_url', _DEFAULT_CLOUD_URL);
   }
-
-  const section = document.createElement('div');
-  section.id = 'cloud-sync-section';
-  section.className = 'setting-item';
-  section.style.cssText = 'flex-direction:column;align-items:stretch;gap:10px;';
-  section.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <span style="display:flex;align-items:center;gap:6px;font-weight:600;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
-        </svg>
-        Cloud Sync
-      </span>
-      <span id="cloud-sync-status" style="font-size:11px;font-weight:600;color:#888;">Not configured</span>
-    </div>
-    <p style="font-size:12px;color:#b3b3b3;margin:0;">
-      Sync liked songs, playlists &amp; history across all your devices — free, no account needed.<br>
-      Uses <b>Firebase Realtime Database</b> (free tier: 1 GB).
-    </p>
-    <div id="cloud-sync-url-row" style="display:flex;gap:8px;align-items:center;">
-      <input id="cloud-sync-url-input" type="url"
-        placeholder="https://your-app-default-rtdb.firebaseio.com"
-        style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);
-               color:var(--text-primary);font-size:13px;min-width:0;"
-        value="${localStorage.getItem('raagam_cloud_url') || ''}" />
-      <button id="cloud-sync-save-btn"
-        style="background:var(--accent);color:#000;border:none;padding:9px 14px;border-radius:8px;
-               font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">
-        Save
-      </button>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button id="cloud-sync-pull-btn"
-        style="flex:1;min-width:110px;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);
-               padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
-        Pull from Cloud
-      </button>
-      <button id="cloud-sync-push-btn"
-        style="flex:1;min-width:110px;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);
-               padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
-        Push to Cloud
-      </button>
-    </div>
-    <details style="font-size:11px;color:#888;cursor:pointer;">
-      <summary style="color:#b3b3b3;font-weight:600;">How to set up Firebase (2 minutes, free)</summary>
-      <ol style="margin:8px 0 0 16px;line-height:1.8;">
-        <li>Go to <b>console.firebase.google.com</b> → Create project (free)</li>
-        <li>Click <b>Realtime Database</b> → Create Database → Start in test mode</li>
-        <li>Copy the database URL (looks like <code>https://my-app-rtdb.firebaseio.com</code>)</li>
-        <li>Paste it above and tap Save</li>
-        <li>Your liked songs, playlists &amp; history sync automatically</li>
-      </ol>
-      <p style="margin:6px 0 0;">Your data is keyed by your email/phone — only you can access it.</p>
-    </details>
-  `;
-  panel.appendChild(section);
-
-  document.getElementById('cloud-sync-save-btn').addEventListener('click', () => {
-    const url = document.getElementById('cloud-sync-url-input').value.trim();
-    localStorage.setItem('raagam_cloud_url', url);
-    if (url && state.userProfile?.userId) {
-      showToast('Cloud sync URL saved — syncing now...');
-      cloudSync.push().then(() => cloudSync.mergeFromCloud());
-    } else if (!state.userProfile?.userId) {
-      showToast('Add your email/phone in Settings → User Profile first');
-    } else {
-      showToast('Cloud sync URL cleared');
-      _updateCloudSyncStatus('idle');
-    }
-  });
-
-  document.getElementById('cloud-sync-pull-btn').addEventListener('click', () => {
-    if (!cloudSync.enabled) { showToast('Configure your Firebase URL first'); return; }
-    cloudSync.mergeFromCloud();
-  });
-
-  document.getElementById('cloud-sync-push-btn').addEventListener('click', () => {
-    if (!cloudSync.enabled) { showToast('Configure your Firebase URL first'); return; }
-    cloudSync.push();
-  });
-
-  // Show current sync status
-  if (cloudSync.enabled) _updateCloudSyncStatus('synced');
 }
 
 // ── Profile Backup Settings UI ───────────────────────────────────────────────
