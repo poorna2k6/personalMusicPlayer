@@ -1,106 +1,160 @@
-// Recommendation engine for smart auto-play
-export function getRecommendedTracks(currentTrack, allTracks, playedTracks = [], maxRecommendations = 5) {
-  if (!currentTrack || !allTracks.length) return [];
+// Party DJ recommendation engine
+// Goal: variety first, smooth transitions second — never the same artist back-to-back
 
-  const playedIds = new Set(playedTracks.map(t => t.id));
-  const availableTracks = allTracks.filter(t => t.id !== currentTrack.id && !playedIds.has(t.id));
+const MOOD_MAP = {
+  romantic: ['prema', 'love', 'jaan', 'pyar', 'romantic', 'heart', 'ishq', 'dil'],
+  folk:     ['folk', 'telangana', 'traditional', 'dance', 'janapadha', 'paata'],
+  classical: ['classical', 'raaga', 'carnatic', 'hindustani', 'swaraalu'],
+  devotional: ['devotional', 'bhakti', 'temple', 'god', 'spiritual', 'mantra'],
+  party:    ['party', 'dance', 'beat', 'club', 'remix', 'dj'],
+  sad:      ['sad', 'cry', 'tears', 'pain', 'broken', 'farewell'],
+};
 
-  if (availableTracks.length === 0) return [];
+// Moods that can transition into each other smoothly
+const MOOD_TRANSITIONS = {
+  romantic: ['romantic', 'sad', 'classical'],
+  folk:     ['folk', 'party', 'classical'],
+  classical: ['classical', 'devotional', 'romantic', 'folk'],
+  devotional: ['devotional', 'classical'],
+  party:    ['party', 'folk', 'romantic'],
+  sad:      ['sad', 'romantic', 'classical'],
+  null:     ['romantic', 'folk', 'classical', 'devotional', 'party', 'sad'],
+};
 
-  // Calculate similarity scores for each track
-  const scoredTracks = availableTracks.map(track => ({
-    ...track,
-    score: calculateSimilarityScore(currentTrack, track)
-  }));
-
-  // Sort by score (highest first) and return top recommendations
-  return scoredTracks
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxRecommendations);
+function detectMood(track) {
+  if (!track) return null;
+  const text = `${track.title} ${track.album} ${track.genre || ''}`.toLowerCase();
+  for (const [mood, keywords] of Object.entries(MOOD_MAP)) {
+    if (keywords.some(kw => text.includes(kw))) return mood;
+  }
+  return null;
 }
 
-function calculateSimilarityScore(track1, track2) {
+// Scores a candidate track for how well it fits as the NEXT track in a party set.
+// Core principle: penalize repetition heavily, reward variety and smooth mood transitions.
+function scoreForPartyDJ(candidate, recentlyPlayed, currentMood) {
   let score = 0;
 
-  // Same artist: high weight
-  if (track1.artist === track2.artist) {
-    score += 50;
+  // --- Anti-clustering: penalise artists/albums heard recently ---
+  const last5Artists = recentlyPlayed.slice(0, 5).map(t => t.artist);
+  const last3Artists = recentlyPlayed.slice(0, 3).map(t => t.artist);
+  const last3Albums  = recentlyPlayed.slice(0, 3).map(t => t.album);
+
+  const artistOccurrences = last5Artists.filter(a => a === candidate.artist).length;
+  score -= artistOccurrences * 30; // -30 each time the artist appeared in the last 5 tracks
+
+  // Immediate repeat artist — hard block
+  if (recentlyPlayed[0]?.artist === candidate.artist) score -= 60;
+
+  // Repeat album in last 3 tracks — strong block
+  if (last3Albums.includes(candidate.album)) score -= 40;
+
+  // --- Variety reward ---
+  if (!last3Artists.includes(candidate.artist)) score += 25;  // Fresh artist
+  if (last5Artists.filter(a => a === candidate.artist).length === 0) score += 10; // Not heard at all recently
+
+  // --- Mood transition (smooth, not mood-locked) ---
+  const candidateMood = detectMood(candidate);
+  const allowedMoods = MOOD_TRANSITIONS[currentMood] || MOOD_TRANSITIONS.null;
+
+  if (currentMood && candidateMood === currentMood) {
+    score += 5;  // Same mood: small bonus (don't lock, just slightly prefer)
+  } else if (allowedMoods.includes(candidateMood)) {
+    score += 15; // Adjacent/transition mood: good fit
+  } else if (candidateMood !== null) {
+    score -= 10; // Jarring mood shift: small penalty
   }
 
-  // Same album: very high weight
-  if (track1.album === track2.album) {
-    score += 40;
-  }
+  // --- Genre affinity (lighter weight than before) ---
+  const recentGenres = recentlyPlayed.slice(0, 3).map(t => t.genre);
+  if (!recentGenres.includes(candidate.genre)) score += 10; // Genre variety bonus
+  if (candidate.genre && recentlyPlayed[0]?.genre === candidate.genre) score -= 5; // Gentle same-genre penalty
 
-  // Same genre: medium weight
-  if (track1.genre === track2.genre) {
-    score += 20;
-  }
-
-  // Similar year (within 5 years): small weight
-  if (Math.abs((track1.year || 0) - (track2.year || 0)) <= 5) {
-    score += 10;
-  }
-
-  // Telugu music specific: keyword matching in titles
-  const teluguKeywords = [
-    'prema', 'love', 'heart', 'jaan', 'pyar', 'song', 'melody', 'raaga',
-    'telugu', 'tamil', 'hindi', 'bollywood', 'folk', 'classical',
-    'dance', 'romantic', 'sad', 'happy', 'emotional'
-  ];
-
-  const title1Words = track1.title.toLowerCase().split(/\s+/);
-  const title2Words = track2.title.toLowerCase().split(/\s+/);
-
-  const commonWords = title1Words.filter(word =>
-    title2Words.includes(word) && teluguKeywords.includes(word)
-  );
-
-  score += commonWords.length * 15;
-
-  // Boost score for tracks with similar duration (within 2 minutes)
-  if (Math.abs(track1.duration - track2.duration) <= 120) {
-    score += 5;
+  // --- Year affinity (small signal) ---
+  if (recentlyPlayed[0] && Math.abs((candidate.year || 0) - (recentlyPlayed[0].year || 0)) <= 5) {
+    score += 3;
   }
 
   return score;
 }
 
-// Get tracks that would make a good sequence
-export function getSequentialRecommendations(currentTrack, allTracks, playedTracks = []) {
-  const recommendations = getRecommendedTracks(currentTrack, allTracks, playedTracks, 10);
+// Main export: Party DJ next-track selection
+// Returns up to `count` tracks that would make a great next set — varied, fresh, flowing.
+export function getPartyDJRecommendations(currentTrack, allTracks, recentlyPlayed = [], count = 8) {
+  if (!currentTrack || !allTracks.length) return [];
 
-  // For Telugu music, try to create mood-based sequences
-  const moodKeywords = {
-    romantic: ['prema', 'love', 'jaan', 'pyar', 'romantic', 'heart'],
-    folk: ['folk', 'telangana', 'traditional', 'dance', 'folk rhythms'],
-    classical: ['classical', 'raaga', 'carnatic', 'hindustani', 'raagam'],
-    devotional: ['devotional', 'bhakti', 'temple', 'god', 'spiritual']
-  };
+  const playedIds = new Set(recentlyPlayed.map(t => t.id));
+  playedIds.add(currentTrack.id);
+
+  // Candidates = tracks not recently played
+  const candidates = allTracks.filter(t => !playedIds.has(t.id));
+
+  // If library is small and we've exhausted unplayed tracks, allow played ones back in
+  // but still exclude the immediate last 3 to avoid jarring repeats
+  const lastThreeIds = new Set(recentlyPlayed.slice(0, 3).map(t => t.id));
+  const pool = candidates.length >= count
+    ? candidates
+    : allTracks.filter(t => t.id !== currentTrack.id && !lastThreeIds.has(t.id));
+
+  if (pool.length === 0) return [];
 
   const currentMood = detectMood(currentTrack);
-  if (currentMood) {
-    return recommendations.filter(track => detectMood(track) === currentMood).slice(0, 5);
+
+  const scored = pool.map(track => ({
+    ...track,
+    _score: scoreForPartyDJ(track, recentlyPlayed, currentMood),
+  }));
+
+  // Sort by score descending, then pick top results
+  scored.sort((a, b) => b._score - a._score);
+
+  // Take top 2× the count, then randomise slightly to avoid mechanical predictability
+  const topPool = scored.slice(0, count * 2);
+  topPool.sort(() => Math.random() - 0.5);
+
+  // Final selection: ensure no two adjacent tracks are the same artist
+  const selected = [];
+  const used = new Set();
+  for (const track of topPool) {
+    if (selected.length >= count) break;
+    if (used.has(track.id)) continue;
+    const lastSelected = selected[selected.length - 1];
+    if (lastSelected?.artist === track.artist) continue; // avoid adjacent same artist
+    selected.push(track);
+    used.add(track.id);
   }
 
-  return recommendations.slice(0, 5);
+  // If strict filtering left us short, fill with remaining top candidates
+  if (selected.length < count) {
+    for (const track of scored) {
+      if (selected.length >= count) break;
+      if (!used.has(track.id)) {
+        selected.push(track);
+        used.add(track.id);
+      }
+    }
+  }
+
+  // Strip the internal score field before returning
+  return selected.map(({ _score, ...track }) => track);
 }
 
-function detectMood(track) {
-  const text = `${track.title} ${track.album} ${track.genre || ''}`.toLowerCase();
-
-  if (text.includes('prema') || text.includes('love') || text.includes('romantic')) {
-    return 'romantic';
-  }
-  if (text.includes('folk') || text.includes('traditional') || text.includes('dance')) {
-    return 'folk';
-  }
-  if (text.includes('classical') || text.includes('raaga') || text.includes('carnatic')) {
-    return 'classical';
-  }
-  if (text.includes('devotional') || text.includes('bhakti') || text.includes('spiritual')) {
-    return 'devotional';
-  }
-
-  return null;
+// Kept for backward compatibility — routes through Party DJ engine
+export function getSequentialRecommendations(currentTrack, allTracks, playedTracks = []) {
+  return getPartyDJRecommendations(currentTrack, allTracks, playedTracks, 5);
 }
+
+// Used by HomeView to build a Daily Mix for a specific genre/mood
+export function buildMix(tracks, genreOrMood, maxTracks = 30) {
+  const keyword = genreOrMood.toLowerCase();
+  const matching = tracks.filter(t => {
+    const text = `${t.genre || ''} ${t.title} ${t.album}`.toLowerCase();
+    return text.includes(keyword);
+  });
+
+  // Shuffle for daily freshness
+  const shuffled = [...matching].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, maxTracks);
+}
+
+export { detectMood };

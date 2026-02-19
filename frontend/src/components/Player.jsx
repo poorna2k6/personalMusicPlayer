@@ -6,10 +6,10 @@ export default function Player({ player }) {
   const [playbackError, setPlaybackError] = useState(null);
   const {
     currentTrack, isPlaying, volume, currentTime, duration,
-    shuffle, repeat,
+    shuffle, repeat, djMode,
     setCurrentTime, setDuration, setIsPlaying,
     togglePlay, nextTrack, prevTrack, setVolume,
-    toggleShuffle, toggleRepeat,
+    toggleShuffle, toggleRepeat, toggleDjMode,
   } = player;
 
   // Sync audio element with player state
@@ -38,9 +38,7 @@ export default function Player({ player }) {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Ignore when typing in an input/textarea
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
       switch (e.key) {
         case ' ':
           e.preventDefault();
@@ -70,7 +68,6 @@ export default function Player({ player }) {
           break;
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentTrack, togglePlay, nextTrack, prevTrack, setVolume, volume]);
@@ -80,13 +77,8 @@ export default function Player({ player }) {
     if (audio) audio.volume = volume;
   }, [volume]);
 
-  const handleTimeUpdate = () => {
-    setCurrentTime(audioRef.current.currentTime);
-  };
-
-  const handleLoadedMetadata = () => {
-    setDuration(audioRef.current.duration);
-  };
+  const handleTimeUpdate = () => setCurrentTime(audioRef.current.currentTime);
+  const handleLoadedMetadata = () => setDuration(audioRef.current.duration);
 
   const handleEnded = () => {
     setPlaybackError(null);
@@ -118,7 +110,7 @@ export default function Player({ player }) {
 
   if (!currentTrack) {
     return (
-      <footer className="h-20 bg-surface-900 border-t border-surface-800 flex items-center justify-center">
+      <footer className="h-20 bg-surface-900 border-t border-surface-800 flex items-center justify-center shrink-0">
         <p className="text-surface-500 text-sm">Select a track to start playing</p>
         <audio ref={audioRef} />
       </footer>
@@ -126,7 +118,7 @@ export default function Player({ player }) {
   }
 
   return (
-    <footer className="h-24 bg-surface-900 border-t border-surface-800 flex items-center px-4 gap-4 relative">
+    <footer className="h-24 bg-surface-900 border-t border-surface-800 flex items-center px-4 gap-4 relative shrink-0">
       {playbackError && (
         <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full mb-1 px-3 py-1.5 rounded-lg bg-red-900/90 border border-red-700 text-red-200 text-xs whitespace-nowrap z-10">
           {playbackError}
@@ -159,6 +151,12 @@ export default function Player({ player }) {
         <div className="min-w-0">
           <p className="text-sm font-medium truncate">{currentTrack.title}</p>
           <p className="text-xs text-surface-400 truncate">{currentTrack.artist}</p>
+          {djMode && (
+            <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-600/30 text-indigo-300 border border-indigo-500/30">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+              DJ MODE
+            </span>
+          )}
         </div>
       </div>
 
@@ -205,13 +203,13 @@ export default function Player({ player }) {
 
           <button
             onClick={toggleRepeat}
-            className={`p-1 transition-colors ${repeat !== 'none' ? 'text-indigo-400' : 'text-surface-400 hover:text-white'}`}
+            className={`p-1 transition-colors relative ${repeat !== 'none' ? 'text-indigo-400' : 'text-surface-400 hover:text-white'}`}
             title={`Repeat: ${repeat}`}
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z" />
             </svg>
-            {repeat === 'one' && <span className="text-[8px] absolute mt-[-8px] ml-[-2px]">1</span>}
+            {repeat === 'one' && <span className="text-[8px] absolute -top-0.5 -right-0.5 font-bold">1</span>}
           </button>
         </div>
 
@@ -231,8 +229,25 @@ export default function Player({ player }) {
         </div>
       </div>
 
-      {/* Volume */}
-      <div className="flex items-center gap-2 w-40 shrink-0 justify-end">
+      {/* Right side: DJ Mode + Volume */}
+      <div className="flex items-center gap-3 w-48 shrink-0 justify-end">
+        {/* Party DJ toggle */}
+        <button
+          onClick={toggleDjMode}
+          title={djMode ? 'DJ Mode ON — click to disable' : 'Enable Party DJ Mode'}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${
+            djMode
+              ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-300'
+              : 'bg-surface-800 border-surface-700 text-surface-400 hover:text-white hover:border-surface-600'
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
+          </svg>
+          DJ
+        </button>
+
+        {/* Volume */}
         <button
           onClick={() => setVolume(volume > 0 ? 0 : 0.8)}
           className="text-surface-400 hover:text-white transition-colors"
@@ -255,7 +270,7 @@ export default function Player({ player }) {
           step={0.01}
           value={volume}
           onChange={(e) => setVolume(parseFloat(e.target.value))}
-          className="w-24"
+          className="w-20"
         />
       </div>
     </footer>

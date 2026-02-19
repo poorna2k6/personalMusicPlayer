@@ -14,9 +14,10 @@ export default function Sidebar({ view, setView, playlists, onSelectPlaylist, on
   };
 
   const navItems = [
-    { id: 'tracks', label: 'All Tracks', icon: MusicIcon },
-    { id: 'artists', label: 'Artists', icon: ArtistIcon },
-    { id: 'albums', label: 'Albums', icon: AlbumIcon },
+    { id: 'home',    label: 'Home',            icon: HomeIcon },
+    { id: 'tracks',  label: 'All Tracks',       icon: MusicIcon },
+    { id: 'artists', label: 'Artists',          icon: ArtistIcon },
+    { id: 'albums',  label: 'Albums',           icon: AlbumIcon },
     ...(hasRecentlyPlayed ? [{ id: 'recent', label: 'Recently Played', icon: RecentIcon }] : []),
   ];
 
@@ -77,11 +78,7 @@ export default function Sidebar({ view, setView, playlists, onSelectPlaylist, on
             <button
               key={p.id}
               onClick={() => onSelectPlaylist(p)}
-              className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-sm transition-colors text-left ${
-                view === 'playlist'
-                  ? 'text-surface-300 hover:bg-surface-800'
-                  : 'text-surface-300 hover:bg-surface-800'
-              }`}
+              className="flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-sm transition-colors text-left text-surface-300 hover:bg-surface-800"
             >
               <svg className="w-4 h-4 shrink-0 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h10" />
@@ -96,6 +93,14 @@ export default function Sidebar({ view, setView, playlists, onSelectPlaylist, on
         </div>
       </div>
     </aside>
+  );
+}
+
+function HomeIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955a1.126 1.126 0 011.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+    </svg>
   );
 }
 
