@@ -5,13 +5,14 @@ import Library from './components/Library';
 import AlbumView from './components/AlbumView';
 import ArtistView from './components/ArtistView';
 import PlaylistView from './components/PlaylistView';
+import HomeView from './components/HomeView';
 import Player from './components/Player';
 import TrackRow from './components/TrackRow';
 import { fetchTracks, fetchArtists, fetchAlbums, fetchPlaylists, scanLibrary } from './api';
 
 export default function App() {
   const player = usePlayerStore();
-  const [view, setView] = useState('tracks'); // 'tracks' | 'artists' | 'albums' | 'playlist'
+  const [view, setView] = useState('home');
   const [tracks, setTracks] = useState([]);
   const [artists, setArtists] = useState([]);
   const [albums, setAlbums] = useState([]);
@@ -21,8 +22,11 @@ export default function App() {
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const loadData = async () => {
+    setLoadError(null);
     try {
       const [t, ar, al, pl] = await Promise.all([
         fetchTracks(),
@@ -34,13 +38,19 @@ export default function App() {
       setArtists(ar);
       setAlbums(al);
       setPlaylists(pl);
+      // Keep player aware of the full library for DJ recommendations
+      player.updateAllTracks(t);
     } catch (err) {
       console.error('Failed to load data:', err);
+      setLoadError('Could not load your music library. Make sure the server is running, then click Retry.');
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleScan = async () => {
@@ -74,7 +84,41 @@ export default function App() {
   };
 
   const renderContent = () => {
+    if (loading) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-4">
+          <svg className="w-10 h-10 text-indigo-400 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+          </svg>
+          <p className="text-surface-400 text-sm">Loading your library…</p>
+        </div>
+      );
+    }
+
+    if (loadError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-6">
+          <svg className="w-12 h-12 text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <div>
+            <p className="text-white font-medium mb-1">Could not load music library</p>
+            <p className="text-surface-400 text-sm">{loadError}</p>
+          </div>
+          <button
+            onClick={loadData}
+            className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+
     switch (view) {
+      case 'home':
+        return <HomeView tracks={tracks} player={player} playlists={playlists} onUpdate={loadData} />;
       case 'artist':
         return <ArtistView artist={selectedArtist} player={player} />;
       case 'album':
@@ -105,10 +149,10 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-surface-950">
       {/* Top bar */}
-      <header className="flex items-center justify-between px-6 py-3 bg-surface-900 border-b border-surface-800">
+      <header className="flex items-center justify-between px-6 py-3 bg-surface-900 border-b border-surface-800 shrink-0">
         <h1
           className="text-xl font-bold text-indigo-400 cursor-pointer"
-          onClick={() => { setView('tracks'); setSearchQuery(''); loadData(); }}
+          onClick={() => { setView('home'); setSearchQuery(''); loadData(); }}
         >
           Raagam
         </h1>
@@ -125,7 +169,7 @@ export default function App() {
             disabled={scanning}
             className="px-3 py-1.5 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors"
           >
-            {scanning ? 'Scanning...' : 'Scan Library'}
+            {scanning ? 'Scanning…' : 'Scan Library'}
           </button>
         </div>
       </header>
