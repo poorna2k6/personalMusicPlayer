@@ -2252,6 +2252,11 @@ async function getAutoPlayRecommendations() {
     );
 
     if (uniqueResults.length === 0) {
+      // Fallback chain: liked songs → recently played → stop
+      const fallback = state.liked.length
+        ? state.liked[Math.floor(Math.random() * Math.min(state.liked.length, 20))]
+        : (state.recent.length ? state.recent[Math.floor(Math.random() * Math.min(state.recent.length, 10))] : null);
+      if (fallback) { playSong(fallback); return; }
       showToast('No recommendations found');
       state.isPlaying = false;
       updatePlayerUI();
@@ -2263,10 +2268,10 @@ async function getAutoPlayRecommendations() {
     const recommendations = getRecommendedTracks(state.currentTrack, filteredResults, state.playedTracks, 3);
 
     if (recommendations.length === 0) {
-      // Fallback to random from filtered results
-      const randomTrack = filteredResults[Math.floor(Math.random() * Math.min(filteredResults.length, 5))];
-      playSong(randomTrack);
-      return;
+      // Fallback to random from filtered results, then liked songs
+      const randomTrack = filteredResults[Math.floor(Math.random() * Math.min(filteredResults.length, 5))]
+        || (state.liked.length ? state.liked[Math.floor(Math.random() * Math.min(state.liked.length, 10))] : null);
+      if (randomTrack) { playSong(randomTrack); return; }
     }
 
     // Add recommendations to queue and play first one
@@ -2277,7 +2282,12 @@ async function getAutoPlayRecommendations() {
     showToast(`Playing ${recommendations.length} recommended ${currentGenre} songs`);
   } catch (e) {
     console.error('Auto-play error:', e);
-    showToast('Could not get recommendations');
+    // Network/API failure — fall back to liked songs or recently played instead of stopping
+    const fallback = state.liked.length
+      ? state.liked[Math.floor(Math.random() * Math.min(state.liked.length, 20))]
+      : (state.recent.length ? state.recent[Math.floor(Math.random() * Math.min(state.recent.length, 10))] : null);
+    if (fallback) { playSong(fallback); return; }
+    showToast('Auto-play unavailable — no liked songs to fall back to');
     state.isPlaying = false;
     updatePlayerUI();
   }
@@ -4236,6 +4246,12 @@ const djMixer = {
     // Set initial crossfader
     this.applyCrossfader(state.djCrossfaderPos);
     this.initialized = true;
+
+    // Register visibility listener so AudioContext resumes when app comes back from background
+    if (!this._visibilityHandler) {
+      this._visibilityHandler = this._onVisibilityChange.bind(this);
+      document.addEventListener('visibilitychange', this._visibilityHandler);
+    }
   },
 
   applyCrossfader(pos) {
@@ -4258,10 +4274,13 @@ const djMixer = {
     const color = DECK_COLORS[idx % DECK_COLORS.length];
     const colorRgb = DECK_COLORS_RGB[idx % DECK_COLORS_RGB.length];
 
-    // Create audio element
+    // Create audio element — must be in DOM for iOS background audio
     const aud = new Audio();
     aud.crossOrigin = 'anonymous';
     aud.preload = 'auto';
+    aud.setAttribute('playsinline', '');
+    aud.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;';
+    document.body.appendChild(aud);
 
     // Web Audio nodes
     let source = null; // Created lazily on first loadTrack to avoid CORS issues
@@ -4471,6 +4490,9 @@ const djMixer = {
       this.startWaveform(deck);
       // Start auto EQ if globally enabled
       if (state.djAutoEQGlobal && !deck._autoEQInterval) this.startAutoEQ(deck);
+      // Keep audio session alive in background + update OS lock screen
+      this.startKeepAlive();
+      this.updateMediaSession(deck);
     }).catch(e => console.warn('playDeck error:', e));
   },
 
@@ -4483,6 +4505,11 @@ const djMixer = {
     this._updateDeckPlayingUI(deck);
     // Stop auto EQ on pause
     if (deck._autoEQInterval) this.stopAutoEQ(deck);
+    // If ALL decks are now paused, release keep-alive
+    if (state.djDecks.every(d => !d.isPlaying)) {
+      this.stopKeepAlive();
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+    }
   },
 
   stopDeck(deckId) {
@@ -6289,11 +6316,107 @@ const djMixer = {
     selB.value = state.djCrossfaderAssign.b;
   },
 
+  // === Background Audio: Keep-alive, MediaSession, Visibility ===
+
+  _keepAliveAudio: null,
+  _visibilityHandler: null,
+
+  startKeepAlive() {
+    if (this._keepAliveAudio) return;
+    const ka = new Audio();
+    ka.setAttribute('playsinline', '');
+    ka.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;';
+    // Minimal silent WAV — keeps iOS audio session alive so decks don't get killed
+    ka.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    ka.loop = true;
+    ka.volume = 0.001;
+    document.body.appendChild(ka);
+    ka.play().catch(() => {});
+    this._keepAliveAudio = ka;
+  },
+
+  stopKeepAlive() {
+    if (!this._keepAliveAudio) return;
+    this._keepAliveAudio.pause();
+    this._keepAliveAudio.src = '';
+    if (this._keepAliveAudio.parentNode) this._keepAliveAudio.parentNode.removeChild(this._keepAliveAudio);
+    this._keepAliveAudio = null;
+  },
+
+  // Update OS lock-screen / notification shade with current DJ track
+  updateMediaSession(deck) {
+    if (!('mediaSession' in navigator) || !deck?.track) return;
+    const track = deck.track;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: getTrackName(track),
+        artist: getArtistName(track),
+        album: 'DJ Mode — Raagam',
+        artwork: (track.image || []).slice(0, 3)
+          .map(img => ({ src: img.url || img.link || '', sizes: img.quality || '500x500', type: 'image/jpeg' }))
+          .filter(a => a.src),
+      });
+      navigator.mediaSession.playbackState = 'playing';
+      // Reroute OS media buttons to DJ controls
+      navigator.mediaSession.setActionHandler('play', () => this._resumePlayingDecks());
+      navigator.mediaSession.setActionHandler('pause', () => this._pauseAllDecks());
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        const playing = state.djDecks.filter(d => d.isPlaying);
+        const target = playing[playing.length - 1] || state.djDecks[0];
+        if (target) this.autoLoadNextSong(target).then(t => { if (t) this.playDeck(target.id); });
+      });
+      navigator.mediaSession.setActionHandler('previoustrack', null);
+    } catch (e) { console.warn('[DJ MediaSession]', e); }
+  },
+
+  _resumePlayingDecks() {
+    if (this.context?.state === 'suspended') this.context.resume();
+    state.djDecks.forEach(deck => {
+      if (deck.isPlaying && deck.audio.paused) deck.audio.play().catch(() => {});
+    });
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+  },
+
+  _pauseAllDecks() {
+    state.djDecks.forEach(deck => { if (deck.isPlaying) this.pauseDeck(deck.id); });
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+  },
+
+  // Called by visibilitychange — resumes AudioContext and any stalled decks
+  _onVisibilityChange() {
+    if (document.hidden || !state.djActive) return;
+    if (this.context?.state === 'suspended') {
+      this.context.resume().then(() => this._resumePlayingDecks()).catch(() => {});
+    } else {
+      this._resumePlayingDecks();
+    }
+    // Catch up Auto DJ tick that may have been throttled while backgrounded
+    if (state.djAutoDJEnabled) this._autoDJTick();
+  },
+
   // === Cleanup ===
   destroy() {
+    // Stop background keep-alive
+    this.stopKeepAlive();
+    // Remove visibility listener
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
+    // Reset MediaSession back to main player
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.setActionHandler('nexttrack', playNext);
+        navigator.mediaSession.setActionHandler('previoustrack', playPrev);
+        navigator.mediaSession.setActionHandler('play', togglePlay);
+        navigator.mediaSession.setActionHandler('pause', togglePlay);
+        navigator.mediaSession.playbackState = 'none';
+      } catch (e) { /* ok */ }
+    }
     state.djDecks.forEach(d => {
       d.audio.pause();
       d.audio.src = '';
+      if (d.audio.parentNode) d.audio.parentNode.removeChild(d.audio);
       if (d.waveformAnim) cancelAnimationFrame(d.waveformAnim);
       try {
         if (d.source) d.source.disconnect();
