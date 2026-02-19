@@ -967,6 +967,68 @@
     </div>
   </div>
 
+  <!-- Firebase SDKs & Initialization -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyD8Zrnd7RWJEtUzLWZoGYkwASe2WDaDqU4",
+      authDomain: "raaga-29c3d.firebaseapp.com",
+      projectId: "raaga-29c3d",
+      storageBucket: "raaga-29c3d.firebasestorage.app",
+      messagingSenderId: "428156117346",
+      appId: "1:428156117346:web:80ee22529fa0f649670c3b"
+    };
+
+    try {
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      const db = getFirestore(app);
+      const provider = new GoogleAuthProvider();
+
+      // Expose to global scope for app.js
+      window.raagamFirebase = {
+        auth,
+        db,
+        signIn: () => signInWithPopup(auth, provider),
+        signOut: () => signOut(auth),
+        // Helper to save profile
+        saveProfile: async (uid, data) => {
+          try {
+            await setDoc(doc(db, "users", uid), data, { merge: true });
+            console.log("Profile saved to cloud");
+            return true;
+          } catch (e) {
+            console.error("Error saving profile:", e);
+            return false;
+          }
+        },
+        // Helper to get profile
+        getProfile: async (uid) => {
+          try {
+            const docSnap = await getDoc(doc(db, "users", uid));
+            return docSnap.exists() ? docSnap.data() : null;
+          } catch (e) {
+            console.error("Error getting profile:", e);
+            return null;
+          }
+        }
+      };
+
+      // Listen for auth state changes
+      onAuthStateChanged(auth, (user) => {
+        // Dispatch event so app.js knows auth state changed
+        window.dispatchEvent(new CustomEvent('raagam:auth-changed', { detail: { user } }));
+      });
+
+      console.log("Firebase initialized successfully");
+    } catch (e) {
+      console.error("Firebase initialization failed:", e);
+    }
+  </script>
+
   <script src="app.js"></script>
 </body>
 </html>

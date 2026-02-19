@@ -13,7 +13,7 @@ function safeParse(key, fallback) {
     return JSON.parse(raw);
   } catch (e) {
     console.warn(`[safeParse] Corrupted localStorage key "${key}" — cleared.`, e);
-    try { localStorage.removeItem(key); } catch (_) {}
+    try { localStorage.removeItem(key); } catch (_) { }
     return fallback;
   }
 }
@@ -164,15 +164,15 @@ const analytics = {
     else if (ua.includes('Firefox')) { browser = 'Firefox'; browserVersion = ua.match(/Firefox\/(\d+)/)?.[1] || ''; }
 
     // OS detection
-    if (ua.includes('iPhone')) { os = 'iOS'; osVersion = ua.match(/OS (\d+[_\.]\d+)/)?.[1]?.replace('_','.') || ''; deviceType = 'Mobile'; deviceModel = 'iPhone'; }
-    else if (ua.includes('iPad')) { os = 'iPadOS'; osVersion = ua.match(/OS (\d+[_\.]\d+)/)?.[1]?.replace('_','.') || ''; deviceType = 'Tablet'; deviceModel = 'iPad'; }
+    if (ua.includes('iPhone')) { os = 'iOS'; osVersion = ua.match(/OS (\d+[_\.]\d+)/)?.[1]?.replace('_', '.') || ''; deviceType = 'Mobile'; deviceModel = 'iPhone'; }
+    else if (ua.includes('iPad')) { os = 'iPadOS'; osVersion = ua.match(/OS (\d+[_\.]\d+)/)?.[1]?.replace('_', '.') || ''; deviceType = 'Tablet'; deviceModel = 'iPad'; }
     else if (ua.includes('Android')) {
       os = 'Android'; osVersion = ua.match(/Android (\d+[\.]\d*)/)?.[1] || '';
       deviceType = ua.includes('Mobile') ? 'Mobile' : 'Tablet';
       deviceModel = ua.match(/;\s*([^;)]+)\s*Build/)?.[1]?.trim() || ua.match(/;\s*([^;)]+)\s*\)/)?.[1]?.trim() || 'Android Device';
     }
     else if (ua.includes('Windows')) { os = 'Windows'; osVersion = ua.match(/Windows NT (\d+\.\d+)/)?.[1] || ''; }
-    else if (ua.includes('Mac OS X')) { os = 'macOS'; osVersion = ua.match(/Mac OS X (\d+[_\.]\d+)/)?.[1]?.replace(/_/g,'.') || ''; }
+    else if (ua.includes('Mac OS X')) { os = 'macOS'; osVersion = ua.match(/Mac OS X (\d+[_\.]\d+)/)?.[1]?.replace(/_/g, '.') || ''; }
     else if (ua.includes('Linux')) { os = 'Linux'; }
     else if (ua.includes('CrOS')) { os = 'ChromeOS'; deviceType = 'Desktop'; }
 
@@ -320,7 +320,7 @@ const analytics = {
           this.events.push(...pendingEvents);
           localStorage.removeItem('pending_analytics');
         }
-      } catch (_) {}
+      } catch (_) { }
     }
   },
 
@@ -433,7 +433,7 @@ const analytics = {
       const existing = JSON.parse(localStorage.getItem('pending_analytics') || '[]');
       const merged = existing.concat(events).slice(-200); // keep last 200
       localStorage.setItem('pending_analytics', JSON.stringify(merged));
-    } catch(_) {}
+    } catch (_) { }
   }
 };
 
@@ -463,7 +463,7 @@ const apiHealth = {
       };
       // If stored state was open but enough time passed, set to half-open
       if (this.mirrors[url].state === 'open' &&
-          Date.now() - this.mirrors[url].lastFail > this.resetTimeout) {
+        Date.now() - this.mirrors[url].lastFail > this.resetTimeout) {
         this.mirrors[url].state = 'half-open';
       }
     });
@@ -975,9 +975,9 @@ function calculateSimilarityScore(track1, track2, currentLanguage, currentGenre)
 
   // P1: Skip signal penalty — down-rank skipped artists/genres
   const skipArtist = state.skipSignals[`artist:${getArtistName(track2)}`] || 0;
-  const skipGenre  = state.skipSignals[`genre:${detectGenre(track2)}`] || 0;
+  const skipGenre = state.skipSignals[`genre:${detectGenre(track2)}`] || 0;
   score -= skipArtist * 15;
-  score -= skipGenre  * 8;
+  score -= skipGenre * 8;
 
   return score;
 }
@@ -988,7 +988,7 @@ function recordSkipSignal(track) {
   const listenMs = Date.now() - state.playStartTime;
   if (listenMs > 30000) return; // listened 30s+ = not a skip
   const artistKey = `artist:${getArtistName(track)}`;
-  const genreKey  = `genre:${detectGenre(track)}`;
+  const genreKey = `genre:${detectGenre(track)}`;
   state.skipSignals[artistKey] = Math.min((state.skipSignals[artistKey] || 0) + 1, 10);
   if (detectGenre(track) !== 'general') {
     state.skipSignals[genreKey] = Math.min((state.skipSignals[genreKey] || 0) + 1, 10);
@@ -999,11 +999,11 @@ function recordSkipSignal(track) {
 // ===== P6: Time-of-Day Context =====
 function getTimeOfDayContext() {
   const h = new Date().getHours();
-  if (h >= 5  && h < 9)  return { label: 'Morning',   icon: '🌅', queries: ['devotional morning songs', 'classical peaceful', 'bhakti songs soft'] };
-  if (h >= 9  && h < 13) return { label: 'Focus',     icon: '🎯', queries: ['instrumental focus music', 'acoustic calm light', 'soft concentration'] };
+  if (h >= 5 && h < 9) return { label: 'Morning', icon: '🌅', queries: ['devotional morning songs', 'classical peaceful', 'bhakti songs soft'] };
+  if (h >= 9 && h < 13) return { label: 'Focus', icon: '🎯', queries: ['instrumental focus music', 'acoustic calm light', 'soft concentration'] };
   if (h >= 13 && h < 17) return { label: 'Afternoon', icon: '☀️', queries: ['peppy upbeat trending', 'latest hits energy', 'dance remix popular'] };
-  if (h >= 17 && h < 21) return { label: 'Evening',   icon: '🌆', queries: ['romantic evening songs', 'mood chill relax', 'feel good music'] };
-  return                         { label: 'Night',     icon: '🌙', queries: ['slow romantic night', 'soft lullaby soothing', 'chill lofi night'] };
+  if (h >= 17 && h < 21) return { label: 'Evening', icon: '🌆', queries: ['romantic evening songs', 'mood chill relax', 'feel good music'] };
+  return { label: 'Night', icon: '🌙', queries: ['slow romantic night', 'soft lullaby soothing', 'chill lofi night'] };
 }
 
 // ===== UNIFIED AUTO DJ ENGINE =====
@@ -1012,37 +1012,37 @@ function getTimeOfDayContext() {
 // DJ mixer: auto-fill decks + auto-mix (separate djMixer.toggleAutoDJ).
 
 const SMART_DJ_VIBES = {
-  auto:     { label: 'Auto',         icon: '🕐', queries: null },           // time-based
-  morning:  { label: 'Morning Raga', icon: '🌅', queries: ['devotional morning', 'classical acoustic peaceful', 'bhakti soft'] },
-  focus:    { label: 'Focus',        icon: '🎯', queries: ['instrumental focus', 'acoustic calm lofi', 'study concentration'] },
-  workout:  { label: 'Workout',      icon: '💪', queries: ['dance remix energetic', 'party beats fast', 'high energy songs'] },
-  party:    { label: 'Party',        icon: '🎉', queries: ['party remix hits', 'dance floor peppy', 'upbeat dj songs'] },
-  chill:    { label: 'Chill',        icon: '😎', queries: ['chill lofi soft', 'mellow acoustic calm', 'relax songs slow'] },
-  romantic: { label: 'Romantic',     icon: '💕', queries: ['romantic love songs', 'pyar heart touching', 'love ballad'] },
-  winddown: { label: 'Wind Down',    icon: '🌙', queries: ['slow soothing night', 'soft lullaby peaceful', 'classical slow'] }
+  auto: { label: 'Auto', icon: '🕐', queries: null },           // time-based
+  morning: { label: 'Morning Raga', icon: '🌅', queries: ['devotional morning', 'classical acoustic peaceful', 'bhakti soft'] },
+  focus: { label: 'Focus', icon: '🎯', queries: ['instrumental focus', 'acoustic calm lofi', 'study concentration'] },
+  workout: { label: 'Workout', icon: '💪', queries: ['dance remix energetic', 'party beats fast', 'high energy songs'] },
+  party: { label: 'Party', icon: '🎉', queries: ['party remix hits', 'dance floor peppy', 'upbeat dj songs'] },
+  chill: { label: 'Chill', icon: '😎', queries: ['chill lofi soft', 'mellow acoustic calm', 'relax songs slow'] },
+  romantic: { label: 'Romantic', icon: '💕', queries: ['romantic love songs', 'pyar heart touching', 'love ballad'] },
+  winddown: { label: 'Wind Down', icon: '🌙', queries: ['slow soothing night', 'soft lullaby peaceful', 'classical slow'] }
 };
 
 // ─── DJ SESSION: Energy Arcs & Pool Queries ───────────────────────────────────
 // Energy arc templates: arrays of target energy levels (0=chill, 1=med, 2=high, 3=peak)
 // Each position = one track in the setlist
 const ENERGY_ARCS = {
-  party:    [1, 1, 2, 2, 3, 3, 3, 2, 3, 3, 3, 3, 2, 3, 3, 3, 2, 2, 1, 1],
-  workout:  [2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 2, 3, 2, 2],
-  morning:  [0, 0, 1, 1, 1, 2, 1, 1, 0, 1, 1, 1, 2, 1, 1, 0, 1, 0, 0, 0],
-  focus:    [1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1],
-  chill:    [0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1],
+  party: [1, 1, 2, 2, 3, 3, 3, 2, 3, 3, 3, 3, 2, 3, 3, 3, 2, 2, 1, 1],
+  workout: [2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 2, 3, 2, 2],
+  morning: [0, 0, 1, 1, 1, 2, 1, 1, 0, 1, 1, 1, 2, 1, 1, 0, 1, 0, 0, 0],
+  focus: [1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1],
+  chill: [0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1],
   romantic: [1, 1, 2, 1, 1, 2, 1, 2, 1, 1, 2, 1, 1, 2, 1, 2, 1, 1, 2, 1],
   winddown: [2, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
-  auto:     null  // generated from time of day
+  auto: null  // generated from time of day
 };
 
 // Pool queries per vibe — 5 diverse queries each, fetched in parallel for ~100 songs
 const DJ_POOL_QUERIES = {
-  party:    ['party remix energetic', 'dance hits fast beat', 'dj songs club night', 'upbeat peppy trending', 'bhangra dance remix'],
-  workout:  ['gym workout power songs', 'high energy fast beat', 'running motivation songs', 'pump up remix', 'energetic exercise songs'],
-  morning:  ['morning fresh devotional', 'bhakti songs soft', 'classical peaceful morning', 'light acoustic fresh start', 'sunrise peaceful songs'],
-  focus:    ['instrumental concentration', 'acoustic study calm lofi', 'soft background focus', 'light instrumental work', 'calm ambient peaceful'],
-  chill:    ['chill lofi soft relax', 'mellow slow acoustic', 'easy listening soothing', 'soft night chill', 'peaceful slow mood'],
+  party: ['party remix energetic', 'dance hits fast beat', 'dj songs club night', 'upbeat peppy trending', 'bhangra dance remix'],
+  workout: ['gym workout power songs', 'high energy fast beat', 'running motivation songs', 'pump up remix', 'energetic exercise songs'],
+  morning: ['morning fresh devotional', 'bhakti songs soft', 'classical peaceful morning', 'light acoustic fresh start', 'sunrise peaceful songs'],
+  focus: ['instrumental concentration', 'acoustic study calm lofi', 'soft background focus', 'light instrumental work', 'calm ambient peaceful'],
+  chill: ['chill lofi soft relax', 'mellow slow acoustic', 'easy listening soothing', 'soft night chill', 'peaceful slow mood'],
   romantic: ['romantic love songs', 'pyar heart touching melody', 'love ballad duet', 'slow romantic night', 'emotional love songs'],
   winddown: ['slow soothing night songs', 'lullaby soft sleep', 'peaceful bedtime classical', 'calm gentle night', 'slow melodious wind down'],
   trending: ['trending songs 2025 latest', 'top hits popular', 'viral songs most played', 'new release hot', 'chartbuster hits']
@@ -1050,10 +1050,10 @@ const DJ_POOL_QUERIES = {
 
 // Energy level visual labels and colours used in arc strips
 const ENERGY_META = [
-  { label: 'Chill',  color: '#06b6d4', bg: 'rgba(6,182,212,0.15)'  },  // 0
-  { label: 'Medium', color: '#22c55e', bg: 'rgba(34,197,94,0.15)'  },  // 1
-  { label: 'High',   color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },  // 2
-  { label: 'Peak',   color: '#ef4444', bg: 'rgba(239,68,68,0.15)'  },  // 3
+  { label: 'Chill', color: '#06b6d4', bg: 'rgba(6,182,212,0.15)' },  // 0
+  { label: 'Medium', color: '#22c55e', bg: 'rgba(34,197,94,0.15)' },  // 1
+  { label: 'High', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },  // 2
+  { label: 'Peak', color: '#ef4444', bg: 'rgba(239,68,68,0.15)' },  // 3
 ];
 
 // Energy levels for progression-aware mixing (0=low → 3=peak)
@@ -1130,7 +1130,7 @@ async function _autoDJBootstrap() {
     state.queueIndex = 0;
     playSong(results[0], false);
     renderQueue();
-  } catch(e) { console.warn('[Auto DJ bootstrap]', e); }
+  } catch (e) { console.warn('[Auto DJ bootstrap]', e); }
 }
 
 function stopAutoDJMode() {
@@ -1218,10 +1218,10 @@ async function buildSmartDJQueue() {
     const results = await apiSearch(searchQuery, 25);
     if (!results.length) return;
 
-    const playedIds  = new Set(state.playedTracks.map(t => t.id));
+    const playedIds = new Set(state.playedTracks.map(t => t.id));
     const existingIds = new Set(state.queue.map(t => t.id));
     const fresh = results.filter(t => !playedIds.has(t.id) && !existingIds.has(t.id));
-    const pool  = fresh.length >= 5 ? fresh : results.filter(t => !existingIds.has(t.id));
+    const pool = fresh.length >= 5 ? fresh : results.filter(t => !existingIds.has(t.id));
     if (!pool.length) return;
 
     // Score using similarity + energy matching + anti-clustering
@@ -1267,7 +1267,7 @@ async function buildSmartDJQueue() {
     const vibe = SMART_DJ_VIBES[state.smartDJVibe];
     const timeLabel = vibe?.label === 'Auto' ? getTimeOfDayContext().label : vibe?.label;
     showToast(`Auto DJ: ${picks.length} tracks queued · ${vibe?.icon || '🎧'} ${timeLabel}`);
-  } catch(e) {
+  } catch (e) {
     console.warn('[Auto DJ]', e);
   } finally {
     state.smartDJBusy = false;
@@ -1334,7 +1334,7 @@ async function generateDailyMixes() {
   try {
     const stored = JSON.parse(localStorage.getItem('raagam_daily_mixes') || 'null');
     if (stored?.date === today && stored?.mixes?.length) return stored.mixes;
-  } catch(e) {}
+  } catch (e) { }
   const lang = CONFIG.preferredLanguage || 'hindi';
   const ld = CONFIG.supportedLanguages[lang];
   const lk = ld?.keywords[0] || 'hindi';
@@ -1383,7 +1383,7 @@ async function renderDailyMixes() {
   if (!container) return;
 
   // Show skeleton cards instantly while we validate each mix has real tracks
-  container.innerHTML = [0,1,2,3,4].map(() => `
+  container.innerHTML = [0, 1, 2, 3, 4].map(() => `
     <div style="flex-shrink:0;width:140px">
       <div class="skeleton skeleton-card" style="height:140px;border-radius:12px"></div>
       <div class="skeleton skeleton-text" style="width:80%;margin-top:8px"></div>
@@ -1419,10 +1419,10 @@ async function renderDailyMixes() {
     // Cache validated mixes for the rest of the day
     try {
       localStorage.setItem(cacheKey, JSON.stringify({ date: today, mixes: validMixes }));
-    } catch {}
+    } catch { }
 
     _renderValidatedMixCards(container, validMixes);
-  } catch(e) {
+  } catch (e) {
     console.warn('[Daily Mixes]', e);
     container.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">Daily mixes unavailable. Check your connection.</p>';
   }
@@ -1456,7 +1456,7 @@ function _renderValidatedMixCards(container, mixes) {
           const more = await apiSearch(mix.query, 15);
           const existIds = new Set(tracks.map(t => t.id));
           tracks = [...tracks, ...more.filter(t => !existIds.has(t.id))];
-        } catch {}
+        } catch { }
       }
       if (!tracks.length) { showToast('Could not load mix'); return; }
       state.queue = tracks; state.queueIndex = 0;
@@ -1614,10 +1614,10 @@ async function loadHome() {
   if (bollywoodTitle) bollywoodTitle.textContent = lang === 'hindi' ? 'Bollywood Party Mix' : 'Bollywood Vibes';
 
   const sections = [
-    { id: 'trending-row',  query: `trending ${langName} songs ${currentYear}` },
-    { id: 'language-row',  query: `new ${langName} songs ${currentYear} latest` },
+    { id: 'trending-row', query: `trending ${langName} songs ${currentYear}` },
+    { id: 'language-row', query: `new ${langName} songs ${currentYear} latest` },
     { id: 'bollywood-row', query: lang === 'hindi' ? `bollywood party songs ${currentYear}` : `bollywood top hits ${currentYear}` },
-    { id: 'chill-row',     query: 'chill lofi relax' },
+    { id: 'chill-row', query: 'chill lofi relax' },
   ];
 
   // Try today's cache — renders instantly with zero API calls
@@ -1661,7 +1661,7 @@ async function loadHome() {
     }
   });
 
-  try { localStorage.setItem(sectionCacheKey, JSON.stringify(toCache)); } catch {}
+  try { localStorage.setItem(sectionCacheKey, JSON.stringify(toCache)); } catch { }
 
   state.homeLoaded = true;
 }
@@ -1672,7 +1672,7 @@ async function _refreshHomeSections(sections, cacheKey) {
     const results = await Promise.all(sections.map(s => apiSearch(s.query, 15)));
     const toCache = results.map(tracks => (tracks.length ? tracks : []));
     localStorage.setItem(cacheKey, JSON.stringify(toCache));
-  } catch {}
+  } catch { }
 }
 
 // ===== Search =====
@@ -2513,15 +2513,15 @@ const equalizer = {
   connected: false,
 
   presets: {
-    'off':           { bass: 0,  mid: 0,  treble: 0 },
-    'bass-boost':    { bass: 8,  mid: 1,  treble: -1 },
-    'treble-boost':  { bass: -1, mid: 0,  treble: 7 },
-    'vocal':         { bass: -3, mid: 6,  treble: 3 },
-    'rock':          { bass: 5,  mid: -2, treble: 4 },
-    'pop':           { bass: 2,  mid: 4,  treble: 2 },
-    'classical':     { bass: 0,  mid: 0,  treble: -2 },
-    'jazz':          { bass: 3,  mid: 2,  treble: 4 },
-    'electronic':    { bass: 7,  mid: 0,  treble: 5 }
+    'off': { bass: 0, mid: 0, treble: 0 },
+    'bass-boost': { bass: 8, mid: 1, treble: -1 },
+    'treble-boost': { bass: -1, mid: 0, treble: 7 },
+    'vocal': { bass: -3, mid: 6, treble: 3 },
+    'rock': { bass: 5, mid: -2, treble: 4 },
+    'pop': { bass: 2, mid: 4, treble: 2 },
+    'classical': { bass: 0, mid: 0, treble: -2 },
+    'jazz': { bass: 3, mid: 2, treble: 4 },
+    'electronic': { bass: 7, mid: 0, treble: 5 }
   },
 
   init() {
@@ -2958,7 +2958,7 @@ async function requestWakeLock() {
 
 function releaseWakeLock() {
   if (state.alarmWakeLock) {
-    try { state.alarmWakeLock.release(); } catch (e) {}
+    try { state.alarmWakeLock.release(); } catch (e) { }
     state.alarmWakeLock = null;
   }
 }
@@ -3000,7 +3000,7 @@ async function triggerAlarm() {
 
   // Try to resume audio context
   if (equalizer.context && equalizer.context.state === 'suspended') {
-    try { await equalizer.context.resume(); } catch(e) {}
+    try { await equalizer.context.resume(); } catch (e) { }
   }
 
   // Set autoplay mode if requested
@@ -3122,7 +3122,7 @@ function initAlarmOnLoad() {
         state.alarm = alarmData;
         triggerAlarm();
       }
-    } catch(e) {
+    } catch (e) {
       localStorage.removeItem('raagam_alarm');
     }
   }
@@ -4069,14 +4069,14 @@ function startCrossfade() {
       try {
         const src2 = equalizer.context.createMediaElementSource(state.crossfadeAudio);
         src2.connect(equalizer.filters.bass);
-      } catch(e) { /* may already be connected */ }
+      } catch (e) { /* may already be connected */ }
     }
   }
 
   state.crossfadeAudio.src = nextUrl;
   state.crossfadeAudio.volume = 0;
   state.crossfadeAudio.playbackRate = state.playbackSpeed;
-  state.crossfadeAudio.play().catch(() => {});
+  state.crossfadeAudio.play().catch(() => { });
 
   const dur = state.crossfadeDuration * 1000;
   const steps = 20;
@@ -4102,7 +4102,7 @@ function startCrossfade() {
       audio.src = nextUrl;
       audio.volume = originalVolume;
       audio.playbackRate = state.playbackSpeed;
-      audio.play().catch(() => {});
+      audio.play().catch(() => { });
 
       state.crossfadeAudio.pause();
       state.crossfadeAudio.src = '';
@@ -4588,15 +4588,15 @@ const djMixer = {
     const peaks = [];
     for (let i = 1; i < deck._bpmSamples.length - 1; i++) {
       if (deck._bpmSamples[i].energy > avg * 1.3 &&
-          deck._bpmSamples[i].energy > deck._bpmSamples[i-1].energy &&
-          deck._bpmSamples[i].energy > deck._bpmSamples[i+1].energy) {
+        deck._bpmSamples[i].energy > deck._bpmSamples[i - 1].energy &&
+        deck._bpmSamples[i].energy > deck._bpmSamples[i + 1].energy) {
         peaks.push(deck._bpmSamples[i].time);
       }
     }
     if (peaks.length < 4) return deck.bpmEstimate;
     // Average interval between peaks
     let totalInterval = 0;
-    for (let i = 1; i < peaks.length; i++) totalInterval += peaks[i] - peaks[i-1];
+    for (let i = 1; i < peaks.length; i++) totalInterval += peaks[i] - peaks[i - 1];
     const avgInterval = totalInterval / (peaks.length - 1);
     if (avgInterval > 0) {
       deck.bpmEstimate = Math.round(60000 / avgInterval);
@@ -4915,10 +4915,10 @@ const djMixer = {
     // Build an intelligent query from the reference track's genre + mood
     let queries = [];
     if (refTrack) {
-      const genre  = detectGenre(refTrack);
-      const mood   = detectMood(refTrack);
+      const genre = detectGenre(refTrack);
+      const mood = detectMood(refTrack);
       const artist = getArtistName(refTrack);
-      const title  = getTrackName(refTrack);
+      const title = getTrackName(refTrack);
 
       // Primary: same genre + language
       if (genre !== 'general') queries.push(`${langKeyword} ${genre} songs`);
@@ -4957,8 +4957,8 @@ const djMixer = {
         // Score each candidate using the full similarity scorer (includes skip penalties)
         const scored = refTrack
           ? available
-              .map(t => ({ ...t, _score: calculateSimilarityScore(refTrack, t, detectLanguage(refTrack), detectGenre(refTrack)) }))
-              .sort((a, b) => b._score - a._score)
+            .map(t => ({ ...t, _score: calculateSimilarityScore(refTrack, t, detectLanguage(refTrack), detectGenre(refTrack)) }))
+            .sort((a, b) => b._score - a._score)
           : available;
 
         const best = scored[0];
@@ -5017,8 +5017,8 @@ const djMixer = {
       const avgE = arc.reduce((s, e) => s + e, 0) / arc.length;
       const arcShape = avgE >= 2.5 ? 'Sustained peak energy'
         : avgE >= 1.8 ? 'Build-up to high energy'
-        : avgE >= 1.2 ? 'Balanced energy flow'
-        : 'Relaxed, low-energy flow';
+          : avgE >= 1.2 ? 'Balanced energy flow'
+            : 'Relaxed, low-energy flow';
       desc.textContent = `${vibeLabel} · ${count === 0 ? 'Infinite' : count + ' tracks'} · ${arcShape}`;
     }
   },
@@ -5029,11 +5029,11 @@ const djMixer = {
     if (!base) {
       // Auto: derive from time of day
       const h = new Date().getHours();
-      if      (h >= 5  && h < 9)  base = ENERGY_ARCS.morning;
-      else if (h >= 9  && h < 13) base = ENERGY_ARCS.focus;
+      if (h >= 5 && h < 9) base = ENERGY_ARCS.morning;
+      else if (h >= 9 && h < 13) base = ENERGY_ARCS.focus;
       else if (h >= 13 && h < 17) base = ENERGY_ARCS.party;
       else if (h >= 17 && h < 21) base = ENERGY_ARCS.romantic;
-      else                         base = ENERGY_ARCS.winddown;
+      else base = ENERGY_ARCS.winddown;
     }
     if (count === 0) return [...base]; // infinite — just use the template
     // Extend or trim to requested count by repeating the arc pattern
@@ -5062,17 +5062,17 @@ const djMixer = {
     }
 
     // Build the pre-planned setlist from pool + energy arc
-    const arc    = this._getArcForVibe(cfg.vibe, cfg.songCount || 20);
+    const arc = this._getArcForVibe(cfg.vibe, cfg.songCount || 20);
     const setlist = this.buildDJSetlist(pool, arc);
 
     // Save session state
     state.djSession = {
-      config:       cfg,
-      pool:         pool,
-      setlist:      setlist,
-      setlistIdx:   0,
+      config: cfg,
+      pool: pool,
+      setlist: setlist,
+      setlistIdx: 0,
       poolFetchedAt: Date.now(),
-      usedIds:      new Set()
+      usedIds: new Set()
     };
 
     // Eject existing deck tracks, load first 2 from setlist onto decks
@@ -5152,7 +5152,7 @@ const djMixer = {
         const scored = candidates.map(t => ({
           ...t,
           _score: calculateSimilarityScore(prevTrack, t, detectLanguage(prevTrack), detectGenre(prevTrack))
-                  + (getEnergyLevel(t) === targetEnergy ? 20 : 0)  // bonus for exact energy match
+            + (getEnergyLevel(t) === targetEnergy ? 20 : 0)  // bonus for exact energy match
         })).sort((a, b) => b._score - a._score);
         best = scored[0];
       } else {
@@ -5276,16 +5276,16 @@ const djMixer = {
 
     // Render arc bars — show window of 30 around current position
     const windowStart = Math.max(0, setlistIdx - 5);
-    const windowEnd   = Math.min(setlist.length, windowStart + 30);
+    const windowEnd = Math.min(setlist.length, windowStart + 30);
     const slice = setlist.slice(windowStart, windowEnd);
 
     barsRow.innerHTML = slice.map((slot, i) => {
       const absIdx = windowStart + i;
       const e = slot.energyTarget;
       const m = ENERGY_META[e];
-      const isPast    = absIdx < setlistIdx - 1;
+      const isPast = absIdx < setlistIdx - 1;
       const isCurrent = absIdx === setlistIdx - 1;
-      const isFuture  = absIdx >= setlistIdx;
+      const isFuture = absIdx >= setlistIdx;
       const h = 10 + e * 10; // height 10-40px
       const name = slot.track ? getTrackName(slot.track).slice(0, 12) : '...';
       return `<div class="dj-arc-bar${isCurrent ? ' dj-arc-bar-current' : ''}${isPast ? ' dj-arc-bar-past' : ''}"
@@ -5498,7 +5498,7 @@ const djMixer = {
     const assignA = state.djCrossfaderAssign.a;
     const assignB = state.djCrossfaderAssign.b;
     const onCrossfader = (outIdx === assignA && nextIdx === assignB) ||
-                         (outIdx === assignB && nextIdx === assignA);
+      (outIdx === assignB && nextIdx === assignA);
     if (onCrossfader) {
       // Sweep hardware crossfader to next-deck side over 4s
       const targetPos = nextIdx === assignB ? 100 : 0;
@@ -6007,7 +6007,7 @@ const djMixer = {
       const fillCircle = el.querySelector('.dj-rotary-fill');
       const pointer = el.querySelector('.dj-rotary-pointer');
       const valLabel = el.querySelector('.dj-rotary-val') ||
-                       el.closest('.dj-rotary-group')?.querySelector('.dj-rotary-val');
+        el.closest('.dj-rotary-group')?.querySelector('.dj-rotary-val');
       if (fillCircle) fillCircle.style.strokeDashoffset = offset;
       if (pointer) pointer.style.transform = `rotate(${angleDeg}deg)`;
       if (pointer) pointer.style.transformOrigin = '32px 32px';
@@ -7800,66 +7800,84 @@ let appInitialized = false;
 function init() {
   console.log('init() called');
 
-  // Check if profile is set up
-  if (!state.userProfile) {
-    console.log('Profile not set up, showing profile dialog');
-    showProfileDialog();
-    return;
-  }
-
-  // Check if language setup is needed
-  if (!state.languageSetupComplete) {
-    // Default to hindi if no language was set (e.g. old users upgrading)
-    if (!CONFIG.preferredLanguage) {
-      CONFIG.preferredLanguage = 'hindi';
-      localStorage.setItem('raagam_language', 'hindi');
-    }
-    localStorage.setItem('raagam_language_setup', 'true');
-    state.languageSetupComplete = true;
-  }
-
-  // Show app and remove splash
-  const splashEl = $('#splash');
-  const appEl = $('#app');
-  if (appEl) appEl.classList.remove('hidden');
-  if (splashEl) {
-    splashEl.style.opacity = '0';
-    splashEl.style.transition = 'opacity 0.4s ease';
-    setTimeout(() => splashEl.remove(), 500);
-  }
-  updateGreeting();
-
-  // Only set up events once
-  if (!appInitialized) {
-    appInitialized = true;
-    setupEvents();
-    setupSearch();
-    setupLibrary();
-
-    // Restore saved playback speed
-    if (state.playbackSpeed !== 1) {
-      audio.playbackRate = state.playbackSpeed;
-      const speedLabel = $('#speed-label');
-      if (speedLabel) speedLabel.textContent = `${state.playbackSpeed}x`;
+  try {
+    // Check if profile is set up
+    if (!state.userProfile) {
+      console.log('Profile not set up, showing profile dialog');
+      showProfileDialog();
+      return;
     }
 
-    // Restore alarm if active
-    initAlarmOnLoad();
-
-    // Restore theme
-    applyTheme(state.currentTheme, false);
-    setupThemePicker();
-
-    // Show feature tour for first-time users (after a short delay so UI loads)
-    if (!localStorage.getItem('raagam_feature_tour_seen')) {
-      setTimeout(() => showFeatureTour(), 1200);
+    // Check if language setup is needed
+    if (!state.languageSetupComplete) {
+      // Default to hindi if no language was set (e.g. old users upgrading)
+      if (!CONFIG.preferredLanguage) {
+        CONFIG.preferredLanguage = 'hindi';
+        localStorage.setItem('raagam_language', 'hindi');
+      }
+      localStorage.setItem('raagam_language_setup', 'true');
+      state.languageSetupComplete = true;
     }
 
-    // Settings: Features button
-    const featuresBtn = $('#settings-features-btn');
-    if (featuresBtn) featuresBtn.addEventListener('click', () => showFeatureTour());
+    // Show app and remove splash
+    const splashEl = $('#splash');
+    const appEl = $('#app');
+    if (appEl) appEl.classList.remove('hidden');
+    if (splashEl) {
+      splashEl.style.opacity = '0';
+      splashEl.style.transition = 'opacity 0.4s ease';
+      setTimeout(() => splashEl.remove(), 500);
+    }
+    updateGreeting();
+
+    // Only set up events once
+    if (!appInitialized) {
+      appInitialized = true;
+      try {
+        setupEvents();
+        setupSearch();
+        setupLibrary();
+      } catch (err) {
+        console.error('Error setting up core events:', err);
+      }
+
+      // Restore saved playback speed
+      try {
+        if (state.playbackSpeed !== 1) {
+          audio.playbackRate = state.playbackSpeed;
+          const speedLabel = $('#speed-label');
+          if (speedLabel) speedLabel.textContent = `${state.playbackSpeed}x`;
+        }
+      } catch (e) { console.warn('Speed restore failed', e); }
+
+      // Restore alarm if active
+      try { initAlarmOnLoad(); } catch (e) { console.warn('Alarm restore failed', e); }
+
+      // Restore theme
+      try {
+        applyTheme(state.currentTheme, false);
+        setupThemePicker();
+      } catch (e) { console.warn('Theme restore failed', e); }
+
+      // Show feature tour for first-time users (after a short delay so UI loads)
+      if (!localStorage.getItem('raagam_feature_tour_seen')) {
+        setTimeout(() => showFeatureTour(), 1200);
+      }
+
+      // Settings: Features button
+      const featuresBtn = $('#settings-features-btn');
+      if (featuresBtn) featuresBtn.addEventListener('click', () => showFeatureTour());
+    }
+    loadHome();
+  } catch (criticalError) {
+    console.error('CRITICAL INIT ERROR:', criticalError);
+    // Last ditch effort to show UI
+    const appEl = $('#app');
+    if (appEl) appEl.classList.remove('hidden');
+    const splashEl = $('#splash');
+    if (splashEl) splashEl.remove();
+    showToast('App recovered from error. Please clear data if issues persist.');
   }
-  loadHome();
 }
 
 // ===== USER PROFILES =====
@@ -7876,8 +7894,18 @@ function initUserProfiles() {
   if (!parsed && savedAlt) {
     try { parsed = JSON.parse(savedAlt); } catch (e) { parsed = null; }
   }
+
+  // Robust merge: ensure all required fields exist even if loaded profile is partial
+  const defaults = createDefaultProfile();
+
   if (parsed) {
-    state.userProfile = parsed;
+    // Deep merge stats and preferences to prevent crashes on missing keys
+    state.userProfile = {
+      ...defaults,
+      ...parsed,
+      stats: { ...defaults.stats, ...(parsed.stats || {}) },
+      preferences: { ...defaults.preferences, ...(parsed.preferences || {}) }
+    };
   } else {
     state.userProfile = null; // No profile: trigger onboarding dialog
   }
@@ -7912,6 +7940,10 @@ function createDefaultProfile() {
 
 function updateProfileStats() {
   if (!state.userProfile) return;
+  // Guard against missing stats object
+  if (!state.userProfile.stats) {
+    state.userProfile.stats = createDefaultProfile().stats;
+  }
 
   // Update play time
   if (state.currentSong && state.isPlaying) {
@@ -7930,7 +7962,7 @@ function updateProfileStats() {
     });
 
     const sortedArtists = Object.entries(artistCounts)
-      .sort(([,a], [,b]) => b - a)
+      .sort(([, a], [, b]) => b - a)
       .slice(0, 5)
       .map(([artist]) => artist);
 
@@ -8143,8 +8175,8 @@ const autoBackup = {
           db.createObjectStore('kv', { keyPath: 'k' });
         }
       };
-      req.onsuccess  = (e) => { this._db = e.target.result; resolve(this._db); };
-      req.onerror    = ()  => reject(req.error);
+      req.onsuccess = (e) => { this._db = e.target.result; resolve(this._db); };
+      req.onerror = () => reject(req.error);
     });
   },
 
@@ -8153,7 +8185,7 @@ const autoBackup = {
       const db = await this._open();
       const tx = db.transaction('kv', 'readwrite');
       tx.objectStore('kv').put({ k: key, v: value, t: Date.now() });
-    } catch {}
+    } catch { }
   },
 
   async _get(key) {
@@ -8163,7 +8195,7 @@ const autoBackup = {
         const tx = db.transaction('kv', 'readonly');
         const req = tx.objectStore('kv').get(key);
         req.onsuccess = () => resolve(req.result?.v ?? null);
-        req.onerror   = () => resolve(null);
+        req.onerror = () => resolve(null);
       });
     } catch { return null; }
   },
@@ -8176,15 +8208,15 @@ const autoBackup = {
 
   async _saveAll() {
     await this._put('snapshot', {
-      profile:        state.userProfile,
-      language:       CONFIG.preferredLanguage,
-      liked:          state.liked,
-      playlists:      state.playlists,
-      recent:         state.recent.slice(0, 50),
+      profile: state.userProfile,
+      language: CONFIG.preferredLanguage,
+      liked: state.liked,
+      playlists: state.playlists,
+      recent: state.recent.slice(0, 50),
       favoriteGenres: state.favoriteGenres,
-      skipSignals:    state.skipSignals,
-      theme:          state.currentTheme,
-      savedAt:        Date.now(),
+      skipSignals: state.skipSignals,
+      theme: state.currentTheme,
+      savedAt: Date.now(),
     });
   },
 
@@ -8226,8 +8258,8 @@ const autoBackup = {
 
     if (restored) {
       state.homeLoaded = false;
-      try { updateLikeButtons(); }    catch(_) {}
-      try { updateLibraryCounts(); }  catch(_) {}
+      try { updateLikeButtons(); } catch (_) { }
+      try { updateLibraryCounts(); } catch (_) { }
       console.log('[AutoBackup] Restored profile from IndexedDB');
     }
     return restored;
@@ -8236,20 +8268,20 @@ const autoBackup = {
   // Export profile as a downloadable JSON file
   exportJSON() {
     const data = {
-      version:   1,
+      version: 1,
       exportedAt: new Date().toISOString(),
-      profile:   state.userProfile,
-      language:  CONFIG.preferredLanguage,
-      liked:     state.liked,
+      profile: state.userProfile,
+      language: CONFIG.preferredLanguage,
+      liked: state.liked,
       playlists: state.playlists,
-      recent:    state.recent.slice(0, 50),
-      theme:     state.currentTheme,
+      recent: state.recent.slice(0, 50),
+      theme: state.currentTheme,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `raagam-profile-${new Date().toISOString().slice(0,10)}.json`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `raagam-profile-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   },
@@ -8283,7 +8315,7 @@ const autoBackup = {
           state.homeLoaded = false;
           autoBackup.schedule();
           resolve(data);
-        } catch(err) { reject(err); }
+        } catch (err) { reject(err); }
       };
       reader.onerror = () => reject(reader.error);
       reader.readAsText(file);
@@ -8348,7 +8380,7 @@ function _initProfileBackupUI() {
       showToast('Profile imported! Home is refreshing…');
       state.homeLoaded = false;
       loadHome();
-    } catch(err) {
+    } catch (err) {
       showToast('Import failed — invalid file');
     }
     e.target.value = ''; // reset so same file can be re-selected
@@ -8359,7 +8391,7 @@ function _initProfileBackupUI() {
     const el = document.getElementById('profile-backup-info');
     if (!el || !snap?.savedAt) return;
     const d = new Date(snap.savedAt);
-    el.textContent = `Last backup: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+    el.textContent = `Last backup: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   });
 }
 
@@ -9290,7 +9322,7 @@ function addDownloadButtonToResult(resultItem, track) {
 
 // Override playSong to support offline tracks
 const originalPlaySong = playSong;
-playSong = async function(track, addToQueue = true) {
+playSong = async function (track, addToQueue = true) {
   // Check if offline mode and track is downloaded
   if (state.offlineMode && state.offlineTracks.has(track.id)) {
     const offlineTrack = await getOfflineTrack(track.id);
@@ -9370,7 +9402,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Runs async before init() — profile data is available when home renders.
   autoBackup.restore().then(restored => {
     if (restored) showToast('Profile restored from backup');
-  }).catch(() => {});
+  }).catch(() => { });
 
   init();
 
@@ -9379,14 +9411,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // may have failed to attach event listeners, which would otherwise leave a black screen.
   function _uiRecovery(hard) {
     try {
-      const appEl  = $('#app');
+      const appEl = $('#app');
       const splash = $('#splash');
-      const pdlg   = $('#profile-dialog');
-      const ldlg   = $('#language-dialog');
+      const pdlg = $('#profile-dialog');
+      const ldlg = $('#language-dialog');
       if (!appEl || !appEl.classList.contains('hidden')) return; // already visible
 
       const dialogsHidden = (!pdlg || pdlg.classList.contains('hidden')) &&
-                            (!ldlg || ldlg.classList.contains('hidden'));
+        (!ldlg || ldlg.classList.contains('hidden'));
 
       if (dialogsHidden || hard) {
         // Hide any stuck dialogs on hard recovery
@@ -9407,7 +9439,7 @@ document.addEventListener('DOMContentLoaded', () => {
         appEl.classList.remove('hidden');
         if (splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 400); }
         if (!appInitialized) {
-          try { setupEvents(); setupSearch(); setupLibrary(); loadHome(); } catch (_) {}
+          try { setupEvents(); setupSearch(); setupLibrary(); loadHome(); } catch (_) { }
         }
         if (hard) showToast('App recovered — if issues persist, go to Settings → Clear Data');
       }
@@ -9417,7 +9449,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   setTimeout(() => _uiRecovery(false), 1500);  // soft: only fires if no dialog visible
   setTimeout(() => _uiRecovery(false), 4000);  // second soft attempt
-  setTimeout(() => _uiRecovery(true),  8000);  // hard: clears stuck dialogs, forces show
+  setTimeout(() => _uiRecovery(true), 8000);  // hard: clears stuck dialogs, forces show
 });
 
 // ===== bfcache fix =====
