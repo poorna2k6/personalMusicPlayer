@@ -890,10 +890,27 @@ function getRecommendedTracks(currentTrack, allTracks, playedTracks = [], maxRec
     score: calculateSimilarityScore(currentTrack, track, currentLanguage, currentGenre)
   }));
 
-  // Sort by score (highest first) and return top recommendations
-  return scoredTracks
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxRecommendations);
+  // Sort by score descending, then take a wider pool for variety selection
+  const sorted = scoredTracks.sort((a, b) => b.score - a.score);
+  const pool = sorted.slice(0, maxRecommendations * 3);
+
+  // Variety pass: select from pool ensuring no two adjacent tracks share an artist
+  const result = [];
+  const usedIds = new Set();
+  for (const track of pool) {
+    if (result.length >= maxRecommendations) break;
+    if (usedIds.has(track.id)) continue;
+    const prev = result[result.length - 1];
+    if (prev && getArtistName(prev) === getArtistName(track)) continue; // skip back-to-back same artist
+    result.push(track);
+    usedIds.add(track.id);
+  }
+  // Fill remaining slots if strict filtering left gaps
+  for (const track of sorted) {
+    if (result.length >= maxRecommendations) break;
+    if (!usedIds.has(track.id)) { result.push(track); usedIds.add(track.id); }
+  }
+  return result;
 }
 
 function calculateSimilarityScore(track1, track2, currentLanguage, currentGenre) {
@@ -913,15 +930,25 @@ function calculateSimilarityScore(track1, track2, currentLanguage, currentGenre)
     score += 60;
   }
 
-  // Same artist: medium-high weight
+  // Same artist: smaller affinity bonus — full +40 caused too much same-artist clustering
   if (getArtistName(track1) === getArtistName(track2)) {
-    score += 40;
+    score += 15;
   }
 
-  // Same album: medium weight (but lower than language/genre)
+  // Same album: small weight
   if (getAlbumName(track1) === getAlbumName(track2)) {
-    score += 20;
+    score += 10;
   }
+
+  // Anti-clustering: penalise artists the listener has heard recently
+  // Keeps the DJ session feeling varied and party-like rather than artist-locked
+  const recentArtists = (state.playedTracks || []).slice(0, 5).map(t => getArtistName(t));
+  const artistOccurrences = recentArtists.filter(a => a === getArtistName(track2)).length;
+  score -= artistOccurrences * 25; // -25 per recent occurrence (compounding)
+  if (recentArtists[0] === getArtistName(track2)) score -= 20; // extra hit for back-to-back
+
+  // Variety bonus: reward an artist the listener hasn't heard in the last 3 tracks
+  if (!recentArtists.slice(0, 3).includes(getArtistName(track2))) score += 18;
 
   // Theme/keyword matching (reduced weight)
   const themeKeywords = [
@@ -1196,9 +1223,11 @@ async function buildSmartDJQueue() {
     const pool  = fresh.length >= 5 ? fresh : results.filter(t => !existingIds.has(t.id));
     if (!pool.length) return;
 
-    // Score using similarity + energy matching
+    // Score using similarity + energy matching + anti-clustering
     const curTrack = state.currentTrack;
     const curEnergy = getEnergyLevel(curTrack);
+    const recentArtists = (state.playedTracks || []).slice(0, 5).map(t => getArtistName(t));
+
     const scored = pool.map(t => {
       let s = curTrack
         ? calculateSimilarityScore(curTrack, t, detectLanguage(curTrack), detectGenre(curTrack))
@@ -1206,11 +1235,31 @@ async function buildSmartDJQueue() {
       // Prefer tracks within ±1 energy level of current
       const energyDiff = Math.abs(getEnergyLevel(t) - curEnergy);
       s += energyDiff === 0 ? 20 : energyDiff === 1 ? 10 : 0;
+      // Party DJ anti-clustering: penalise recently heard artists
+      const artistCount = recentArtists.filter(a => a === getArtistName(t)).length;
+      s -= artistCount * 30;
+      if (!recentArtists.slice(0, 3).includes(getArtistName(t))) s += 20; // variety bonus
       return { ...t, _score: s };
     }).sort((a, b) => b._score - a._score);
 
-    // Take top 6 tracks
-    const picks = scored.slice(0, 6);
+    // Take top candidates, then ensure no two adjacent tracks share an artist
+    const candidates = scored.slice(0, 12);
+    const picks = [];
+    const usedIds = new Set(state.queue.map(t => t.id));
+    for (const t of candidates) {
+      if (picks.length >= 6) break;
+      if (usedIds.has(t.id)) continue;
+      const prev = picks[picks.length - 1];
+      if (prev && getArtistName(prev) === getArtistName(t)) continue;
+      picks.push(t);
+      usedIds.add(t.id);
+    }
+    // Fill any remaining slots without the adjacency restriction
+    for (const t of scored) {
+      if (picks.length >= 6) break;
+      if (!usedIds.has(t.id)) { picks.push(t); usedIds.add(t.id); }
+    }
+
     state.queue.splice(state.queueIndex + 1, 0, ...picks);
     renderQueue();
 
@@ -1331,34 +1380,91 @@ async function generateDailyMixes() {
 async function renderDailyMixes() {
   const container = $('#daily-mixes-row');
   if (!container) return;
+
+  // Show skeleton cards instantly while we validate each mix has real tracks
+  container.innerHTML = [0,1,2,3,4].map(() => `
+    <div style="flex-shrink:0;width:140px">
+      <div class="skeleton skeleton-card" style="height:140px;border-radius:12px"></div>
+      <div class="skeleton skeleton-text" style="width:80%;margin-top:8px"></div>
+      <div class="skeleton skeleton-text-sm" style="width:60%;margin-top:4px"></div>
+    </div>`).join('');
+
   try {
+    const today = new Date().toDateString();
+    const cacheKey = 'raagam_validated_mixes';
+    const cached = safeParse(cacheKey, null);
+
+    // Reuse today's validated mixes if available — zero API calls
+    if (cached?.date === today && cached?.mixes?.length) {
+      _renderValidatedMixCards(container, cached.mixes);
+      return;
+    }
+
     const mixes = await generateDailyMixes();
-    container.innerHTML = mixes.map(mix => `
-      <div class="mix-card" data-query="${mix.query}" data-title="${mix.title}">
-        <div class="mix-card-art" style="background:${mix.gradient}">
-          <span class="mix-card-icon">${mix.icon}</span>
-          <button class="mix-play-btn" aria-label="Play ${mix.title}">▶</button>
-        </div>
-        <p class="mix-card-title">${mix.title}</p>
-        <p class="mix-card-sub">${mix.subtitle}</p>
-      </div>`).join('');
-    container.querySelectorAll('.mix-card').forEach(card => {
-      const playHandler = async () => {
-        const query = card.dataset.query;
-        const title = card.dataset.title;
-        showToast(`Loading ${title}...`);
-        const tracks = await apiSearch(query, 15);
-        if (!tracks.length) { showToast('Could not load mix'); return; }
-        state.queue = tracks; state.queueIndex = 0;
-        playSong(tracks[0], false);
-        analytics.trackFeatureUsage('daily_mix_play', { mix: title });
-      };
-      card.addEventListener('click', playHandler);
-      card.querySelector('.mix-play-btn')?.addEventListener('click', (e) => { e.stopPropagation(); playHandler(); });
-    });
+    const MIN_TRACKS = 3;
+
+    // Validate all mixes in parallel: only keep those that return >= MIN_TRACKS real tracks
+    const validated = await Promise.all(
+      mixes.map(async mix => {
+        try {
+          const tracks = await apiSearch(mix.query, MIN_TRACKS + 2);
+          return tracks.length >= MIN_TRACKS ? { ...mix, tracks } : null;
+        } catch { return null; }
+      })
+    );
+
+    const validMixes = validated.filter(Boolean);
+
+    // Cache validated mixes for the rest of the day
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify({ date: today, mixes: validMixes }));
+    } catch {}
+
+    _renderValidatedMixCards(container, validMixes);
   } catch(e) {
     console.warn('[Daily Mixes]', e);
+    container.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">Daily mixes unavailable. Check your connection.</p>';
   }
+}
+
+// Renders mix cards for validated mixes (those that confirmed >= 3 tracks)
+function _renderValidatedMixCards(container, mixes) {
+  if (!mixes.length) {
+    container.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">No mixes available right now.</p>';
+    return;
+  }
+
+  container.innerHTML = mixes.map((mix, i) => `
+    <div class="mix-card" data-mix-idx="${i}">
+      <div class="mix-card-art" style="background:${mix.gradient}">
+        <span class="mix-card-icon">${mix.icon}</span>
+        <button class="mix-play-btn" aria-label="Play ${mix.title}">▶</button>
+      </div>
+      <p class="mix-card-title">${mix.title}</p>
+      <p class="mix-card-sub">${mix.subtitle} · ${mix.tracks?.length || 3}+ tracks</p>
+    </div>`).join('');
+
+  container.querySelectorAll('.mix-card').forEach(card => {
+    const mix = mixes[parseInt(card.dataset.mixIdx, 10)];
+    const playHandler = async () => {
+      showToast(`Loading ${mix.title}...`);
+      // Start with pre-validated tracks; fetch more to fill out the queue
+      let tracks = [...(mix.tracks || [])];
+      if (tracks.length < 10) {
+        try {
+          const more = await apiSearch(mix.query, 15);
+          const existIds = new Set(tracks.map(t => t.id));
+          tracks = [...tracks, ...more.filter(t => !existIds.has(t.id))];
+        } catch {}
+      }
+      if (!tracks.length) { showToast('Could not load mix'); return; }
+      state.queue = tracks; state.queueIndex = 0;
+      playSong(tracks[0], false);
+      analytics.trackFeatureUsage('daily_mix_play', { mix: mix.title });
+    };
+    card.addEventListener('click', playHandler);
+    card.querySelector('.mix-play-btn')?.addEventListener('click', e => { e.stopPropagation(); playHandler(); });
+  });
 }
 
 function detectMood(track) {
@@ -1463,16 +1569,17 @@ async function loadHome() {
 
   updateGreeting();
 
-  // Quick picks from recent
+  // ── Instant sections (no API needed) ────────────────────────────────────────
+
+  // Quick Picks from recent plays — rendered immediately
   const quickPicks = $('#quick-picks');
   const recentForPicks = state.recent.slice(0, 6);
   if (recentForPicks.length > 0) {
     quickPicks.innerHTML = recentForPicks.map(t => `
       <div class="quick-card" data-id="${t.id}">
-        <img src="${getImage(t, 'low')}" alt="" />
+        <img src="${getImage(t, 'low')}" alt="" loading="lazy" />
         <span>${getTrackName(t)}</span>
-      </div>
-    `).join('');
+      </div>`).join('');
     quickPicks.querySelectorAll('.quick-card').forEach((card, i) => {
       card.addEventListener('click', () => playSong(recentForPicks[i]));
     });
@@ -1480,61 +1587,91 @@ async function loadHome() {
     quickPicks.innerHTML = '';
   }
 
-  // Recently played section
+  // Recently Played — rendered immediately from local state
   const recentRow = $('#recent-row');
   if (state.recent.length > 0) {
     recentRow.innerHTML = '';
-    const recentTracks = state.recent.slice(0, 10); // Show last 10 played
-    recentTracks.forEach(t => recentRow.appendChild(renderSongCard(t)));
+    state.recent.slice(0, 10).forEach(t => recentRow.appendChild(renderSongCard(t)));
   } else {
     recentRow.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">Play some songs to see them here</p>';
   }
 
-  // P7: Daily Mixes
+  // Daily Mixes — async but shows skeletons immediately, only renders valid categories
   renderDailyMixes();
 
-  // Load sections — dynamic based on user's preferred language
+  // ── API sections (cached for fast reload) ──────────────────────────────────
+
   const lang = CONFIG.preferredLanguage || 'hindi';
   const langName = CONFIG.supportedLanguages[lang]?.name || 'Hindi';
   const currentYear = new Date().getFullYear();
 
-  // Update section titles dynamically
   const trendingTitle = $('#trending-title');
   const languageTitle = $('#language-title');
   const bollywoodTitle = $('#bollywood-title');
   if (trendingTitle) trendingTitle.textContent = `Trending ${langName} Now`;
   if (languageTitle) languageTitle.textContent = `Latest ${langName} Hits`;
-  if (bollywoodTitle) {
-    // If user's language IS hindi, show a different second section instead of duplicate
-    if (lang === 'hindi') {
-      bollywoodTitle.textContent = 'Bollywood Party Mix';
-    } else {
-      bollywoodTitle.textContent = 'Bollywood Vibes';
-    }
-  }
+  if (bollywoodTitle) bollywoodTitle.textContent = lang === 'hindi' ? 'Bollywood Party Mix' : 'Bollywood Vibes';
 
   const sections = [
-    { id: 'trending-row', query: `trending ${langName} songs ${currentYear}` },
-    { id: 'language-row', query: `new ${langName} songs ${currentYear} latest` },
+    { id: 'trending-row',  query: `trending ${langName} songs ${currentYear}` },
+    { id: 'language-row',  query: `new ${langName} songs ${currentYear} latest` },
     { id: 'bollywood-row', query: lang === 'hindi' ? `bollywood party songs ${currentYear}` : `bollywood top hits ${currentYear}` },
-    { id: 'chill-row', query: 'chill lofi relax' },
+    { id: 'chill-row',     query: 'chill lofi relax' },
   ];
 
+  // Try today's cache — renders instantly with zero API calls
+  const today = new Date().toDateString();
+  const sectionCacheKey = `raagam_home_${lang}_${today}`;
+  const cachedSections = safeParse(sectionCacheKey, null);
+
+  if (cachedSections?.length) {
+    sections.forEach((s, i) => {
+      const container = $(`#${s.id}`);
+      if (!container) return;
+      const cached = cachedSections[i];
+      if (cached?.length) {
+        container.innerHTML = '';
+        cached.forEach(t => container.appendChild(renderSongCard(t)));
+      } else {
+        container.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px">Could not load. Check your connection.</p>';
+      }
+    });
+    state.homeLoaded = true;
+    // Silently refresh cache in background so next session gets fresh content
+    setTimeout(() => _refreshHomeSections(sections, sectionCacheKey), 6000);
+    return;
+  }
+
+  // First load today: show skeletons → fetch all sections in parallel → cache results
   sections.forEach(s => renderSkeletons($(`#${s.id}`)));
 
   const results = await Promise.all(sections.map(s => apiSearch(s.query, 15)));
+  const toCache = [];
   results.forEach((tracks, i) => {
     const container = $(`#${sections[i].id}`);
+    if (!container) return;
     container.innerHTML = '';
     if (tracks.length === 0) {
       container.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px">Could not load. Check your connection.</p>';
-      return;
+      toCache.push([]);
+    } else {
+      tracks.forEach(t => container.appendChild(renderSongCard(t)));
+      toCache.push(tracks);
     }
-    tracks.forEach(t => container.appendChild(renderSongCard(t)));
   });
 
+  try { localStorage.setItem(sectionCacheKey, JSON.stringify(toCache)); } catch {}
+
   state.homeLoaded = true;
-  console.log('Home loaded successfully');
+}
+
+// Runs silently in the background to keep the home cache fresh for next session
+async function _refreshHomeSections(sections, cacheKey) {
+  try {
+    const results = await Promise.all(sections.map(s => apiSearch(s.query, 15)));
+    const toCache = results.map(tracks => (tracks.length ? tracks : []));
+    localStorage.setItem(cacheKey, JSON.stringify(toCache));
+  } catch {}
 }
 
 // ===== Search =====
