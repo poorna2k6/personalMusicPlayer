@@ -799,6 +799,7 @@ function addToRecent(track) {
   localStorage.setItem('raagam_history', JSON.stringify(state.history));
 
   updateLibraryCounts();
+  autoBackup.schedule(); // keep recent plays and history in sync with IndexedDB
 }
 
 function showToast(msg) {
@@ -1449,15 +1450,13 @@ function _renderValidatedMixCards(container, mixes) {
     const mix = mixes[parseInt(card.dataset.mixIdx, 10)];
     const playHandler = async () => {
       showToast(`Loading ${mix.title}...`);
-      // Start with pre-validated tracks; fetch more to fill out the queue
-      let tracks = [...(mix.tracks || [])];
-      if (tracks.length < 10) {
-        try {
-          const more = await apiSearch(mix.query, 15);
-          const existIds = new Set(tracks.map(t => t.id));
-          tracks = [...tracks, ...more.filter(t => !existIds.has(t.id))];
-        } catch {}
-      }
+      // Always fetch fresh tracks (avoids stale audio URLs from the validation cache).
+      // Fall back to cached tracks only if the API is unreachable.
+      let tracks = [];
+      try {
+        tracks = await apiSearch(mix.query, 15);
+      } catch {}
+      if (!tracks.length) tracks = mix.tracks || []; // offline / API-down fallback
       if (!tracks.length) { showToast('Could not load mix'); return; }
       state.queue = tracks; state.queueIndex = 0;
       playSong(tracks[0], false);
@@ -3536,6 +3535,7 @@ function renderHistoryView() {
 // ===== Custom Playlists =====
 function savePlaylists() {
   localStorage.setItem('raagam_playlists', JSON.stringify(state.playlists));
+  autoBackup.schedule(); // keep playlists in sync with IndexedDB
 }
 
 function createPlaylist(name) {
@@ -6955,6 +6955,7 @@ function applyTheme(themeName, saveToStorage = true) {
 
   if (saveToStorage) {
     localStorage.setItem('raagam_theme', themeName);
+    autoBackup.schedule(); // back up theme preference
   }
 
   // Update theme picker active state
@@ -7240,6 +7241,7 @@ function setupEvents() {
       const newLang = e.target.value;
       CONFIG.preferredLanguage = newLang;
       localStorage.setItem('raagam_language', newLang);
+      autoBackup.schedule(); // back up language preference
       state.homeLoaded = false; // Force home reload
       showToast(`Language changed to ${CONFIG.supportedLanguages[newLang]?.name || newLang}. Refreshing home...`);
       // Also update the old language select if it exists
@@ -7885,6 +7887,17 @@ function initUserProfiles() {
   // Update profile stats periodically
   updateProfileStats();
   setInterval(updateProfileStats, 60000); // Update every minute
+
+  // Prune stale home-section cache keys from previous days to prevent localStorage bloat.
+  // Each day creates a key like `raagam_home_{lang}_{date}` — remove anything older.
+  const today = new Date().toDateString();
+  try {
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('raagam_home_') && !key.endsWith(today)) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch {}
 }
 
 function createDefaultProfile() {
@@ -9367,12 +9380,16 @@ document.addEventListener('DOMContentLoaded', () => {
   _initProfileBackupUI();
 
   // Restore from IndexedDB if localStorage was purged (iOS 7-day purge, cache clear, etc.)
-  // Runs async before init() — profile data is available when home renders.
-  autoBackup.restore().then(restored => {
+  // Give restore up to 500ms head-start so profile data is ready before home renders.
+  // IndexedDB reads are typically < 20ms so this almost never adds visible delay.
+  Promise.race([
+    autoBackup.restore(),
+    new Promise(resolve => setTimeout(() => resolve(false), 500))
+  ]).then(restored => {
     if (restored) showToast('Profile restored from backup');
-  }).catch(() => {});
-
-  init();
+  }).catch(() => {}).finally(() => {
+    init();
+  });
 
   // Recovery: if app remains hidden after initialization, force-show at 1.5s / 4s / 8s.
   // The 8-second hard recovery also dismisses stuck dialogs (profile / language) that
