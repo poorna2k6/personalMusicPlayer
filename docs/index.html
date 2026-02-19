@@ -182,9 +182,19 @@
               <p id="history-count">0 songs</p>
             </div>
           </div>
+          <div class="library-item" id="downloads-card">
+            <div style="width:48px;height:48px;border-radius:8px;background:linear-gradient(135deg,#7c3aed,#06b6d4);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="#fff"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            </div>
+            <div class="library-item-info">
+              <h3>Downloads</h3>
+              <p id="downloads-count">0 songs</p>
+            </div>
+          </div>
           <div id="liked-list" class="track-list hidden"></div>
           <div id="recent-list" class="track-list hidden"></div>
           <div id="history-list" class="track-list hidden"></div>
+          <div id="downloads-list" class="track-list hidden"></div>
           <!-- Custom Playlists -->
           <div id="playlist-cards"></div>
           <div id="playlist-detail-list" class="track-list hidden"></div>
@@ -282,6 +292,10 @@
           <button id="np-add-playlist-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Add to Playlist">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M14 10H2v2h12v-2zm0-4H2v2h12V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM2 16h8v-2H2v2z"/></svg>
             <span>Playlist</span>
+          </button>
+          <button id="np-download-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Download for offline">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            <span id="np-download-label">Download</span>
           </button>
           <button id="np-lyrics-btn" class="icon-btn np-secondary np-extra-btn" aria-label="Lyrics" style="display:none;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 9h-2v2H9v-2H7v-2h2V7h2v2h2v2zm-2 8H9v-6h2v6zm4 0h-2v-4h2v4zm2-12h-5.5V2.5L17 7z"/></svg>
@@ -747,11 +761,14 @@
   <div id="profile-dialog" class="dialog-overlay hidden">
     <div class="dialog-box">
       <h2>Welcome to Raagam</h2>
-      <p style="color:#b3b3b3;margin-bottom:1rem;">Set up your profile</p>
+      <p style="color:#b3b3b3;margin-bottom:1rem;">Set up your profile to sync your music across devices</p>
       <form id="profile-form">
-        <input type="text" id="user-name" placeholder="Your name" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:12px;font-size:16px;" />
-        <input type="tel" id="user-phone" placeholder="Phone (optional)" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:12px;font-size:16px;" />
-        <label style="display:block;color:#b3b3b3;font-size:13px;margin-bottom:6px;">Preferred Language</label>
+        <input type="text" id="user-name" placeholder="Your name" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:12px;font-size:16px;box-sizing:border-box;" />
+        <input type="email" id="user-email" placeholder="Email address" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:10px;font-size:16px;box-sizing:border-box;" />
+        <input type="tel" id="user-phone" placeholder="Phone number (if no email)" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:4px;font-size:16px;box-sizing:border-box;" />
+        <p id="profile-contact-hint" style="color:#888;font-size:12px;margin:0 0 4px;line-height:1.4;">Email or phone required — your unique key to sync liked songs, playlists &amp; history across devices.</p>
+        <p id="profile-contact-error" style="color:#ff5252;font-size:12px;margin:0 0 10px;display:none;font-weight:600;"></p>
+        <label style="display:block;color:#b3b3b3;font-size:13px;margin-bottom:6px;margin-top:8px;">Preferred Language</label>
         <select id="user-language" style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:16px;font-size:16px;appearance:auto;">
           <option value="telugu">Telugu</option>
           <option value="hindi">Hindi</option>
@@ -765,9 +782,9 @@
           <option value="gujarati">Gujarati</option>
           <option value="bhojpuri">Bhojpuri</option>
         </select>
-        <button type="submit" style="width:100%;padding:12px;border-radius:24px;background:#1DB954;color:#000;font-weight:bold;border:none;font-size:16px;cursor:pointer;">Continue</button>
+        <button type="submit" style="width:100%;padding:12px;border-radius:24px;background:#1DB954;color:#000;font-weight:bold;border:none;font-size:16px;cursor:pointer;">Get Started</button>
       </form>
-      <button id="skip-profile" style="width:100%;padding:12px;margin-top:8px;background:transparent;border:1px solid #555;border-radius:24px;color:#fff;font-size:14px;cursor:pointer;">Skip for now</button>
+      <button id="skip-profile" style="width:100%;padding:10px;margin-top:8px;background:transparent;border:none;color:#666;font-size:13px;cursor:pointer;">Use without sync (data stays on this device only)</button>
     </div>
   </div>
 

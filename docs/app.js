@@ -785,6 +785,7 @@ function toggleLike(track) {
   updateLikeButtons();
   updateLibraryCounts();
   autoBackup.schedule(); // auto-backup liked songs to IndexedDB
+  cloudSync.schedule();  // push liked change to cloud
 }
 
 function addToRecent(track) {
@@ -3274,6 +3275,8 @@ function updateLikeButtons() {
   const liked = isLiked(state.currentTrack.id);
   $('#mini-like')?.classList.toggle('liked', liked);
   $('#np-like')?.classList.toggle('liked', liked);
+  // Refresh download button state for current track
+  _updateNpDownloadBtn(state.currentTrack);
 }
 
 function updateLibraryCounts() {
@@ -3281,6 +3284,85 @@ function updateLibraryCounts() {
   $('#recent-count').textContent = `${state.recent.length} song${state.recent.length !== 1 ? 's' : ''}`;
   const historyCount = $('#history-count');
   if (historyCount) historyCount.textContent = `${state.history.length} song${state.history.length !== 1 ? 's' : ''}`;
+  const dlCount2 = $('#downloads-count');
+  if (dlCount2) dlCount2.textContent = `${state.offlineTracks.size} song${state.offlineTracks.size !== 1 ? 's' : ''}`;
+}
+
+// Renders all downloaded tracks in the Library > Downloads view
+async function renderDownloadsView() {
+  const listEl = $('#downloads-list');
+  if (!listEl) return;
+  listEl.classList.remove('hidden');
+  listEl.innerHTML = '';
+
+  const header = document.createElement('div');
+  header.className = 'track-list-header';
+  header.innerHTML = `
+    <h3>Downloads</h3>
+    <button class="back-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      Close
+    </button>
+  `;
+  header.querySelector('.back-btn').addEventListener('click', () => {
+    listEl.classList.add('hidden');
+  });
+  listEl.appendChild(header);
+
+  if (state.offlineTracks.size === 0) {
+    listEl.innerHTML += '<div class="empty-state"><p>No downloads yet. Tap the download button on any track.</p></div>';
+    return;
+  }
+
+  // Load full track data from IndexedDB
+  if (!state.offlineDB) { listEl.innerHTML += '<div class="empty-state"><p>Download storage unavailable.</p></div>'; return; }
+  try {
+    const db = state.offlineDB;
+    const tx = db.transaction(['tracks'], 'readonly');
+    const all = await new Promise(resolve => {
+      const req = tx.objectStore('tracks').getAll();
+      req.onsuccess = () => resolve(req.result);
+    });
+
+    // Storage usage info
+    const totalMB = (all.reduce((s, t) => s + (t.size || 0), 0) / 1048576).toFixed(1);
+    const infoBar = document.createElement('div');
+    infoBar.style.cssText = 'padding:10px 16px;font-size:12px;color:#888;display:flex;justify-content:space-between;';
+    infoBar.innerHTML = `<span>${all.length} song${all.length !== 1 ? 's' : ''}</span><span>${totalMB} MB used</span>`;
+    listEl.appendChild(infoBar);
+
+    all.forEach(offTrack => {
+      const div = document.createElement('div');
+      div.className = 'result-item';
+      div.innerHTML = `
+        <div class="result-art"><img src="${offTrack.image || ''}" alt="" loading="lazy" onerror="this.style.display='none'" /></div>
+        <div class="result-info">
+          <p class="result-title" style="color:var(--accent);">${offTrack.name}</p>
+          <p class="result-sub">${offTrack.artist}</p>
+        </div>
+        <div class="result-actions">
+          <button class="icon-btn dl-remove-btn" style="padding:6px;color:#ff5252;" title="Remove download">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+      `;
+      // Play from offline
+      div.querySelector('.result-info').addEventListener('click', () => {
+        const track = { id: offTrack.id, name: offTrack.name, primaryArtists: offTrack.artist, image: [{ url: offTrack.image }], duration: offTrack.duration };
+        playSong(track);
+      });
+      // Remove download
+      div.querySelector('.dl-remove-btn').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await removeOfflineTrack(offTrack.id);
+        div.remove();
+        updateLibraryCounts();
+      });
+      listEl.appendChild(div);
+    });
+  } catch (err) {
+    listEl.innerHTML += `<div class="empty-state"><p>Could not load downloads.</p></div>`;
+  }
 }
 
 function updateProgress() {
@@ -3440,6 +3522,20 @@ function setupLibrary() {
     });
   }
 
+  // Downloads card — shows all offline-downloaded tracks
+  const downloadsCard = $('#downloads-card');
+  if (downloadsCard) {
+    downloadsCard.addEventListener('click', () => {
+      if (showingList === 'downloads') { hideList(); return; }
+      showingList = 'downloads';
+      $('#liked-list').classList.add('hidden');
+      $('#recent-list').classList.add('hidden');
+      const histEl = $('#history-list');
+      if (histEl) histEl.classList.add('hidden');
+      renderDownloadsView();
+    });
+  }
+
   updateLibraryCounts();
 }
 
@@ -3546,6 +3642,7 @@ function renderHistoryView() {
 function savePlaylists() {
   localStorage.setItem('raagam_playlists', JSON.stringify(state.playlists));
   autoBackup.schedule(); // keep playlists in sync with IndexedDB
+  cloudSync.schedule();  // push playlist change to cloud
 }
 
 function createPlaylist(name) {
@@ -7397,6 +7494,20 @@ function setupEvents() {
   // Share
   $('#np-share-btn').addEventListener('click', shareSong);
 
+  // Download current track from now-playing screen
+  $('#np-download-btn')?.addEventListener('click', () => {
+    if (!state.currentTrack) return;
+    const track = state.currentTrack;
+    const isDownloaded = state.offlineTracks.has(track.id);
+    const isDownloading = state.offlineDownloading.has(track.id);
+    if (isDownloading) { showToast('Already downloading...'); return; }
+    if (isDownloaded) {
+      removeOfflineTrack(track.id).then(() => _updateNpDownloadBtn(track));
+    } else {
+      downloadTrack(track).then(() => _updateNpDownloadBtn(track));
+    }
+  });
+
   // Sleep Timer
   $('#np-sleep-btn').addEventListener('click', openSleepTimerDialog);
   $('#sleep-timer-cancel').addEventListener('click', closeSleepTimerDialog);
@@ -7845,27 +7956,48 @@ function showProfileDialog() {
 
   newForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    const name = newForm.querySelector('#user-name').value.trim();
+    const name  = newForm.querySelector('#user-name').value.trim();
+    const email = newForm.querySelector('#user-email').value.trim();
     const phone = newForm.querySelector('#user-phone').value.trim();
-    const lang = newForm.querySelector('#user-language')?.value || 'hindi';
+    const lang  = newForm.querySelector('#user-language')?.value || 'hindi';
+    const errorEl = newForm.querySelector('#profile-contact-error');
 
-    if (name) {
-      CONFIG.userProfile = { name, phone };
-    } else {
-      CONFIG.userProfile = { name: 'Music Lover', phone: '' };
+    // Validate: email OR phone required for cross-device sync identity
+    const emailValid = email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    const phoneValid = phone && phone.replace(/[\s\-().+]/g, '').length >= 7;
+
+    if (!email && !phone) {
+      errorEl.textContent = 'Please enter your email or phone number to continue.';
+      errorEl.style.display = 'block';
+      return;
     }
+    if (email && !emailValid) {
+      errorEl.textContent = 'Please enter a valid email address (e.g. you@gmail.com).';
+      errorEl.style.display = 'block';
+      return;
+    }
+    errorEl.style.display = 'none';
+
+    // Derive a stable userId from email (preferred) or digits of phone
+    const contactKey = emailValid ? email.toLowerCase().trim() : phone.replace(/\D/g, '');
+    const userId = btoa(contactKey).replace(/[^a-zA-Z0-9]/g, '').slice(0, 28);
+
+    CONFIG.userProfile = {
+      name: name || 'Music Lover',
+      email: emailValid ? email.toLowerCase().trim() : '',
+      phone: phoneValid ? phone : '',
+      userId,
+    };
+    CONFIG.preferredLanguage = lang;
     localStorage.setItem('raagam_profile', JSON.stringify(CONFIG.userProfile));
     state.userProfile = CONFIG.userProfile;
 
-    // Save language preference from profile
-    CONFIG.preferredLanguage = lang;
     localStorage.setItem('raagam_language', lang);
     localStorage.setItem('raagam_language_setup', 'true');
     state.languageSetupComplete = true;
 
-    analytics.trackEvent('profile_created', { hasPhone: !!phone, language: lang });
+    analytics.trackEvent('profile_created', { hasEmail: !!emailValid, hasPhone: !!phoneValid, language: lang });
 
-    // Immediately back up the new profile to IndexedDB — no user action needed
     autoBackup.schedule();
 
     // Request persistent storage so iOS doesn't purge this data after 7 days
@@ -7874,17 +8006,16 @@ function showProfileDialog() {
     });
 
     dialog.classList.add('hidden');
-    init(); // Continue to next step
+    init();
   });
 
   newSkip.addEventListener('click', () => {
     dialog.classList.add('hidden');
-    // Set a default profile so init() doesn't loop back here
-    CONFIG.userProfile = { name: 'Music Lover', phone: '' };
+    // Anonymous profile — data stays local only
+    CONFIG.userProfile = { name: 'Music Lover', email: '', phone: '', userId: '' };
     localStorage.setItem('raagam_profile', JSON.stringify(CONFIG.userProfile));
     state.userProfile = CONFIG.userProfile;
 
-    // Set default language to hindi if not already set
     if (!CONFIG.preferredLanguage) {
       CONFIG.preferredLanguage = 'hindi';
       localStorage.setItem('raagam_language', 'hindi');
@@ -7893,7 +8024,7 @@ function showProfileDialog() {
     }
 
     analytics.trackEvent('profile_skipped');
-    init(); // Continue without profile
+    init();
   });
 }
 
@@ -8426,6 +8557,244 @@ const autoBackup = {
     });
   },
 };
+
+// ── Cloud Sync — Firebase Realtime Database REST API (no SDK needed) ──────────
+// Uses the Firebase Realtime Database REST API directly.
+// The user pastes their database URL once in Settings → Cloud Sync.
+// Data is keyed by userId (derived from email/phone) so the same profile
+// loads automatically on any other device where they enter the same email/phone.
+const cloudSync = {
+  _pushTimer: null,
+
+  get dbUrl() {
+    return (localStorage.getItem('raagam_cloud_url') || '').replace(/\/$/, '');
+  },
+  get enabled() {
+    return !!(this.dbUrl && state.userProfile?.userId);
+  },
+
+  // Debounced push — called after every data change
+  schedule() {
+    if (!this.enabled) return;
+    clearTimeout(this._pushTimer);
+    this._pushTimer = setTimeout(() => this.push(), 6000);
+  },
+
+  // Minimal track shape to keep Firebase storage small
+  _slim(track) {
+    return {
+      id: track.id,
+      name: getTrackName(track),
+      artist: getArtistName(track),
+      image: (track.image?.[0]?.url || track.image?.[0]?.link || ''),
+      duration: track.duration || 0,
+    };
+  },
+
+  async push() {
+    if (!this.enabled) return;
+    const userId = state.userProfile.userId;
+    const payload = {
+      profile: {
+        name:     state.userProfile.name,
+        email:    state.userProfile.email || '',
+        phone:    state.userProfile.phone || '',
+        language: CONFIG.preferredLanguage,
+        theme:    state.currentTheme,
+      },
+      liked:     state.liked.map(t => this._slim(t)),
+      playlists: state.playlists.map(pl => ({
+        id: pl.id, name: pl.name, createdAt: pl.createdAt,
+        tracks: pl.tracks.map(t => this._slim(t)),
+      })),
+      history: state.history.slice(0, 200).map(h => ({
+        id: h.track?.id || h.id || '',
+        name: h.track ? getTrackName(h.track) : (h.name || ''),
+        artist: h.track ? getArtistName(h.track) : (h.artist || ''),
+        playedAt: h.playedAt || Date.now(),
+      })),
+      updatedAt: Date.now(),
+    };
+    try {
+      const res = await fetch(`${this.dbUrl}/users/${userId}.json`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      _updateCloudSyncStatus('synced');
+      console.log('[CloudSync] pushed');
+    } catch (e) {
+      _updateCloudSyncStatus('error', e.message);
+      console.warn('[CloudSync] push failed:', e.message);
+    }
+  },
+
+  async pull() {
+    if (!this.enabled) return null;
+    const userId = state.userProfile.userId;
+    try {
+      const res = await fetch(`${this.dbUrl}/users/${userId}.json`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      console.warn('[CloudSync] pull failed:', e.message);
+      return null;
+    }
+  },
+
+  // Merge remote data into local state; local + remote union (no deletions)
+  async mergeFromCloud() {
+    _updateCloudSyncStatus('syncing');
+    const data = await this.pull();
+    if (!data) { _updateCloudSyncStatus('error', 'No data or connection error'); return false; }
+
+    let changed = false;
+
+    // Merge liked songs (union by id)
+    if (data.liked?.length) {
+      const seen = new Set(state.liked.map(t => t.id));
+      data.liked.forEach(t => {
+        if (t.id && !seen.has(t.id)) { state.liked.push(t); seen.add(t.id); changed = true; }
+      });
+      if (changed) localStorage.setItem('raagam_liked', JSON.stringify(state.liked));
+    }
+
+    // Merge playlists (union by id)
+    if (data.playlists?.length) {
+      const seenPl = new Set(state.playlists.map(p => p.id));
+      data.playlists.forEach(pl => {
+        if (pl.id && !seenPl.has(pl.id)) { state.playlists.push(pl); seenPl.add(pl.id); changed = true; }
+      });
+      if (changed) localStorage.setItem('raagam_playlists', JSON.stringify(state.playlists));
+    }
+
+    // Restore profile fields if missing locally
+    if (data.profile) {
+      if (data.profile.name && state.userProfile.name === 'Music Lover')
+        state.userProfile.name = data.profile.name;
+      if (data.profile.language && !CONFIG.preferredLanguage) {
+        CONFIG.preferredLanguage = data.profile.language;
+        localStorage.setItem('raagam_language', data.profile.language);
+      }
+      CONFIG.userProfile = state.userProfile;
+      localStorage.setItem('raagam_profile', JSON.stringify(state.userProfile));
+    }
+
+    if (changed) {
+      autoBackup.schedule();
+      try { updateLibraryCounts(); } catch (_) {}
+      try { renderPlaylistCards?.(); } catch (_) {}
+    }
+
+    _updateCloudSyncStatus('synced');
+    showToast(changed ? 'Cloud sync: data merged from other device' : 'Cloud sync: up to date');
+    return true;
+  },
+};
+
+function _updateCloudSyncStatus(status, detail) {
+  const el = document.getElementById('cloud-sync-status');
+  if (!el) return;
+  const map = {
+    synced:  { text: 'Synced', color: '#1DB954' },
+    syncing: { text: 'Syncing...', color: '#f59e0b' },
+    error:   { text: `Error: ${detail || 'check URL/rules'}`, color: '#ff5252' },
+    idle:    { text: 'Not configured', color: '#888' },
+  };
+  const s = map[status] || map.idle;
+  el.textContent = s.text;
+  el.style.color = s.color;
+}
+
+// Injected into Settings panel — Cloud Sync section
+function _initCloudSyncUI() {
+  const panel = $('#settings-panel');
+  if (!panel || document.getElementById('cloud-sync-section')) return;
+
+  const section = document.createElement('div');
+  section.id = 'cloud-sync-section';
+  section.className = 'setting-item';
+  section.style.cssText = 'flex-direction:column;align-items:stretch;gap:10px;';
+  section.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="display:flex;align-items:center;gap:6px;font-weight:600;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+        </svg>
+        Cloud Sync
+      </span>
+      <span id="cloud-sync-status" style="font-size:11px;font-weight:600;color:#888;">Not configured</span>
+    </div>
+    <p style="font-size:12px;color:#b3b3b3;margin:0;">
+      Sync liked songs, playlists &amp; history across all your devices — free, no account needed.<br>
+      Uses <b>Firebase Realtime Database</b> (free tier: 1 GB).
+    </p>
+    <div id="cloud-sync-url-row" style="display:flex;gap:8px;align-items:center;">
+      <input id="cloud-sync-url-input" type="url"
+        placeholder="https://your-app-default-rtdb.firebaseio.com"
+        style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);
+               color:var(--text-primary);font-size:13px;min-width:0;"
+        value="${localStorage.getItem('raagam_cloud_url') || ''}" />
+      <button id="cloud-sync-save-btn"
+        style="background:var(--accent);color:#000;border:none;padding:9px 14px;border-radius:8px;
+               font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">
+        Save
+      </button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button id="cloud-sync-pull-btn"
+        style="flex:1;min-width:110px;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);
+               padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+        Pull from Cloud
+      </button>
+      <button id="cloud-sync-push-btn"
+        style="flex:1;min-width:110px;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);
+               padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+        Push to Cloud
+      </button>
+    </div>
+    <details style="font-size:11px;color:#888;cursor:pointer;">
+      <summary style="color:#b3b3b3;font-weight:600;">How to set up Firebase (2 minutes, free)</summary>
+      <ol style="margin:8px 0 0 16px;line-height:1.8;">
+        <li>Go to <b>console.firebase.google.com</b> → Create project (free)</li>
+        <li>Click <b>Realtime Database</b> → Create Database → Start in test mode</li>
+        <li>Copy the database URL (looks like <code>https://my-app-rtdb.firebaseio.com</code>)</li>
+        <li>Paste it above and tap Save</li>
+        <li>Your liked songs, playlists &amp; history sync automatically</li>
+      </ol>
+      <p style="margin:6px 0 0;">Your data is keyed by your email/phone — only you can access it.</p>
+    </details>
+  `;
+  panel.appendChild(section);
+
+  document.getElementById('cloud-sync-save-btn').addEventListener('click', () => {
+    const url = document.getElementById('cloud-sync-url-input').value.trim();
+    localStorage.setItem('raagam_cloud_url', url);
+    if (url && state.userProfile?.userId) {
+      showToast('Cloud sync URL saved — syncing now...');
+      cloudSync.push().then(() => cloudSync.mergeFromCloud());
+    } else if (!state.userProfile?.userId) {
+      showToast('Add your email/phone in Settings → User Profile first');
+    } else {
+      showToast('Cloud sync URL cleared');
+      _updateCloudSyncStatus('idle');
+    }
+  });
+
+  document.getElementById('cloud-sync-pull-btn').addEventListener('click', () => {
+    if (!cloudSync.enabled) { showToast('Configure your Firebase URL first'); return; }
+    cloudSync.mergeFromCloud();
+  });
+
+  document.getElementById('cloud-sync-push-btn').addEventListener('click', () => {
+    if (!cloudSync.enabled) { showToast('Configure your Firebase URL first'); return; }
+    cloudSync.push();
+  });
+
+  // Show current sync status
+  if (cloudSync.enabled) _updateCloudSyncStatus('synced');
+}
 
 // ── Profile Backup Settings UI ───────────────────────────────────────────────
 // Injected into the settings panel once; shows auto-backup status + export/import
@@ -9332,6 +9701,13 @@ function updateOfflineUI() {
     downloadCount.textContent = state.offlineTracks.size;
   }
 
+  // Update library downloads count card
+  const dlCount = $('#downloads-count');
+  if (dlCount) dlCount.textContent = `${state.offlineTracks.size} song${state.offlineTracks.size !== 1 ? 's' : ''}`;
+
+  // Update now-playing download button
+  if (state.currentTrack) _updateNpDownloadBtn(state.currentTrack);
+
   // Update download buttons in result items
   document.querySelectorAll('.result-item').forEach(item => {
     const trackId = item.dataset.trackId;
@@ -9348,6 +9724,17 @@ function updateOfflineUI() {
       }
     }
   });
+}
+
+// Update now-playing download button state
+function _updateNpDownloadBtn(track) {
+  const btn = $('#np-download-btn');
+  const lbl = $('#np-download-label');
+  if (!btn || !track) return;
+  const isDownloaded = state.offlineTracks.has(track.id);
+  const isDownloading = state.offlineDownloading.has(track.id);
+  if (lbl) lbl.textContent = isDownloading ? 'Saving...' : isDownloaded ? 'Downloaded' : 'Download';
+  btn.style.color = isDownloaded ? 'var(--accent)' : '';
 }
 
 // Load offline tracks from IndexedDB
@@ -9501,6 +9888,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize user profiles and backup UI
   initUserProfiles();
   _initProfileBackupUI();
+  _initCloudSyncUI();
 
   // Restore from IndexedDB if localStorage was purged (iOS 7-day purge, cache clear, etc.)
   // Give restore up to 500ms head-start so profile data is ready before home renders.
@@ -9512,6 +9900,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (restored) showToast('Profile restored from backup');
   }).catch(() => {}).finally(() => {
     init();
+    // After init, silently pull from cloud in background (non-blocking)
+    setTimeout(() => { if (cloudSync.enabled) cloudSync.mergeFromCloud().catch(() => {}); }, 3000);
   });
 
   // Recovery: if app remains hidden after initialization, force-show at 1.5s / 4s / 8s.
