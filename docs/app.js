@@ -784,6 +784,7 @@ function toggleLike(track) {
   localStorage.setItem('raagam_liked', JSON.stringify(state.liked));
   updateLikeButtons();
   updateLibraryCounts();
+  autoBackup.schedule(); // auto-backup liked songs to IndexedDB
 }
 
 function addToRecent(track) {
@@ -798,6 +799,7 @@ function addToRecent(track) {
   localStorage.setItem('raagam_history', JSON.stringify(state.history));
 
   updateLibraryCounts();
+  autoBackup.schedule(); // keep recent plays and history in sync with IndexedDB
 }
 
 function showToast(msg) {
@@ -1448,15 +1450,13 @@ function _renderValidatedMixCards(container, mixes) {
     const mix = mixes[parseInt(card.dataset.mixIdx, 10)];
     const playHandler = async () => {
       showToast(`Loading ${mix.title}...`);
-      // Start with pre-validated tracks; fetch more to fill out the queue
-      let tracks = [...(mix.tracks || [])];
-      if (tracks.length < 10) {
-        try {
-          const more = await apiSearch(mix.query, 15);
-          const existIds = new Set(tracks.map(t => t.id));
-          tracks = [...tracks, ...more.filter(t => !existIds.has(t.id))];
-        } catch {}
-      }
+      // Always fetch fresh tracks (avoids stale audio URLs from the validation cache).
+      // Fall back to cached tracks only if the API is unreachable.
+      let tracks = [];
+      try {
+        tracks = await apiSearch(mix.query, 15);
+      } catch {}
+      if (!tracks.length) tracks = mix.tracks || []; // offline / API-down fallback
       if (!tracks.length) { showToast('Could not load mix'); return; }
       state.queue = tracks; state.queueIndex = 0;
       playSong(tracks[0], false);
@@ -3535,6 +3535,7 @@ function renderHistoryView() {
 // ===== Custom Playlists =====
 function savePlaylists() {
   localStorage.setItem('raagam_playlists', JSON.stringify(state.playlists));
+  autoBackup.schedule(); // keep playlists in sync with IndexedDB
 }
 
 function createPlaylist(name) {
@@ -6954,6 +6955,7 @@ function applyTheme(themeName, saveToStorage = true) {
 
   if (saveToStorage) {
     localStorage.setItem('raagam_theme', themeName);
+    autoBackup.schedule(); // back up theme preference
   }
 
   // Update theme picker active state
@@ -7076,6 +7078,7 @@ function openSettings() {
   if (settingsLang) settingsLang.value = CONFIG.preferredLanguage || 'hindi';
   updateHealthStatusUI();
   updateSleepTimerUI();
+  // (cloud sync UI removed — profile backup is automatic)
   // Update EQ and Speed labels in settings
   const settingsEq = $('#settings-eq');
   if (settingsEq) settingsEq.textContent = state.eqPreset === 'off' ? 'Off' : state.eqPreset.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -7238,6 +7241,7 @@ function setupEvents() {
       const newLang = e.target.value;
       CONFIG.preferredLanguage = newLang;
       localStorage.setItem('raagam_language', newLang);
+      autoBackup.schedule(); // back up language preference
       state.homeLoaded = false; // Force home reload
       showToast(`Language changed to ${CONFIG.supportedLanguages[newLang]?.name || newLang}. Refreshing home...`);
       // Also update the old language select if it exists
@@ -7738,6 +7742,14 @@ function showProfileDialog() {
 
     analytics.trackEvent('profile_created', { hasPhone: !!phone, language: lang });
 
+    // Immediately back up the new profile to IndexedDB — no user action needed
+    autoBackup.schedule();
+
+    // Request persistent storage so iOS doesn't purge this data after 7 days
+    navigator.storage?.persist?.().then(granted => {
+      if (granted) console.log('[Storage] Persistent storage granted');
+    });
+
     dialog.classList.add('hidden');
     init(); // Continue to next step
   });
@@ -7875,6 +7887,17 @@ function initUserProfiles() {
   // Update profile stats periodically
   updateProfileStats();
   setInterval(updateProfileStats, 60000); // Update every minute
+
+  // Prune stale home-section cache keys from previous days to prevent localStorage bloat.
+  // Each day creates a key like `raagam_home_{lang}_{date}` — remove anything older.
+  const today = new Date().toDateString();
+  try {
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('raagam_home_') && !key.endsWith(today)) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch {}
 }
 
 function createDefaultProfile() {
@@ -8108,6 +8131,249 @@ function populateUserProfileDialog() {
 
 function saveUserProfile() {
   localStorage.setItem('raagam_user_profile', JSON.stringify(state.userProfile));
+  autoBackup.schedule();
+}
+
+// ===== Auto Profile Backup — IndexedDB =====
+// Silently backs up the full profile to IndexedDB on every change.
+// IndexedDB survives iOS 7-day storage purges and browser "Clear History".
+// On startup, if localStorage appears empty, autoBackup restores everything.
+// Zero user action — profile is backed up the moment they enter their name.
+const autoBackup = {
+  _db: null,
+  _saveTimer: null,
+  DB_NAME: 'raagam-idb',
+  DB_VER: 1,
+
+  // Open (or reuse) the IndexedDB connection
+  async _open() {
+    if (this._db) return this._db;
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(this.DB_NAME, this.DB_VER);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('kv')) {
+          db.createObjectStore('kv', { keyPath: 'k' });
+        }
+      };
+      req.onsuccess  = (e) => { this._db = e.target.result; resolve(this._db); };
+      req.onerror    = ()  => reject(req.error);
+    });
+  },
+
+  async _put(key, value) {
+    try {
+      const db = await this._open();
+      const tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put({ k: key, v: value, t: Date.now() });
+    } catch {}
+  },
+
+  async _get(key) {
+    try {
+      const db = await this._open();
+      return new Promise(resolve => {
+        const tx = db.transaction('kv', 'readonly');
+        const req = tx.objectStore('kv').get(key);
+        req.onsuccess = () => resolve(req.result?.v ?? null);
+        req.onerror   = () => resolve(null);
+      });
+    } catch { return null; }
+  },
+
+  // Debounced save — called after any profile change
+  schedule() {
+    clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => this._saveAll(), 2500);
+  },
+
+  async _saveAll() {
+    await this._put('snapshot', {
+      profile:        state.userProfile,
+      language:       CONFIG.preferredLanguage,
+      liked:          state.liked,
+      playlists:      state.playlists,
+      recent:         state.recent.slice(0, 50),
+      favoriteGenres: state.favoriteGenres,
+      skipSignals:    state.skipSignals,
+      theme:          state.currentTheme,
+      savedAt:        Date.now(),
+    });
+  },
+
+  // Called on startup — restores from IndexedDB if localStorage was purged
+  async restore() {
+    const snap = await this._get('snapshot');
+    if (!snap) return false;
+
+    let restored = false;
+
+    if (snap.liked?.length && !state.liked.length) {
+      state.liked = snap.liked;
+      localStorage.setItem('raagam_liked', JSON.stringify(snap.liked));
+      restored = true;
+    }
+    if (snap.recent?.length && !state.recent.length) {
+      state.recent = snap.recent;
+      localStorage.setItem('raagam_recent', JSON.stringify(snap.recent));
+      restored = true;
+    }
+    if (snap.playlists?.length && !state.playlists.length) {
+      state.playlists = snap.playlists;
+      localStorage.setItem('raagam_playlists', JSON.stringify(snap.playlists));
+      restored = true;
+    }
+    if (snap.profile && !localStorage.getItem('raagam_profile')) {
+      state.userProfile = snap.profile;
+      CONFIG.userProfile = snap.profile;
+      localStorage.setItem('raagam_profile', JSON.stringify(snap.profile));
+      restored = true;
+    }
+    if (snap.language && !CONFIG.preferredLanguage) {
+      CONFIG.preferredLanguage = snap.language;
+      localStorage.setItem('raagam_language', snap.language);
+      state.languageSetupComplete = true;
+      localStorage.setItem('raagam_language_setup', 'true');
+      restored = true;
+    }
+
+    if (restored) {
+      state.homeLoaded = false;
+      try { updateLikeButtons(); }    catch(_) {}
+      try { updateLibraryCounts(); }  catch(_) {}
+      console.log('[AutoBackup] Restored profile from IndexedDB');
+    }
+    return restored;
+  },
+
+  // Export profile as a downloadable JSON file
+  exportJSON() {
+    const data = {
+      version:   1,
+      exportedAt: new Date().toISOString(),
+      profile:   state.userProfile,
+      language:  CONFIG.preferredLanguage,
+      liked:     state.liked,
+      playlists: state.playlists,
+      recent:    state.recent.slice(0, 50),
+      theme:     state.currentTheme,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `raagam-profile-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
+  // Import profile from a JSON file the user selects
+  importJSON(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = JSON.parse(e.target.result);
+          if (data.liked?.length) {
+            const seen = new Set(state.liked.map(t => t.id));
+            data.liked.forEach(t => { if (!seen.has(t.id)) { state.liked.push(t); seen.add(t.id); } });
+            localStorage.setItem('raagam_liked', JSON.stringify(state.liked));
+          }
+          if (data.playlists?.length && !state.playlists.length) {
+            state.playlists = data.playlists;
+            localStorage.setItem('raagam_playlists', JSON.stringify(state.playlists));
+          }
+          if (data.recent?.length) {
+            const seen = new Set(state.recent.map(t => t.id));
+            data.recent.forEach(t => { if (!seen.has(t.id)) { state.recent.push(t); seen.add(t.id); } });
+            state.recent = state.recent.slice(0, 50);
+            localStorage.setItem('raagam_recent', JSON.stringify(state.recent));
+          }
+          if (data.language && !CONFIG.preferredLanguage) {
+            CONFIG.preferredLanguage = data.language;
+            localStorage.setItem('raagam_language', data.language);
+          }
+          state.homeLoaded = false;
+          autoBackup.schedule();
+          resolve(data);
+        } catch(err) { reject(err); }
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file);
+    });
+  },
+};
+
+// ── Profile Backup Settings UI ───────────────────────────────────────────────
+// Injected into the settings panel once; shows auto-backup status + export/import
+function _initProfileBackupUI() {
+  const panel = $('#settings-panel');
+  if (!panel || document.getElementById('profile-backup-section')) return;
+
+  const section = document.createElement('div');
+  section.id = 'profile-backup-section';
+  section.className = 'setting-item';
+  section.style.cssText = 'flex-direction:column;align-items:stretch;gap:10px;';
+  section.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="display:flex;align-items:center;gap:6px;font-weight:600;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 6h-2.18c.07-.44.18-.88.18-1.25C18 2.57 15.86 1 13.5 1c-1.4 0-2.72.58-3.65 1.6L9 3.5l-.85-.9C7.22 1.58 5.9 1 4.5 1 2.14 1 0 2.57 0 4.75c0 2.7 2.83 5.05 7.13 8.5L9 14.8l1.87-1.55C15.17 9.8 18 7.45 18 4.75c0-.37-.11-.81-.18-1.25H20c1.1 0 2 .9 2 2v11c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2v-5h2v5h16V7.5z"/>
+        </svg>
+        Profile &amp; Backup
+      </span>
+      <span style="font-size:11px;color:#1DB954;font-weight:600;">Auto-saved</span>
+    </div>
+    <p style="font-size:12px;color:#b3b3b3;margin:0;">
+      Your liked songs, playlists &amp; history are <b>automatically backed up</b> on this device.
+      Export a file to restore your profile on another device.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button id="profile-export-btn"
+        style="flex:1;min-width:120px;background:var(--accent);color:#000;border:none;
+               padding:9px 12px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+        Export Profile
+      </button>
+      <label id="profile-import-label"
+        style="flex:1;min-width:120px;background:var(--bg-card);color:var(--text-primary);
+               border:1px solid var(--border);padding:9px 12px;border-radius:8px;
+               font-size:13px;font-weight:600;cursor:pointer;text-align:center;">
+        Import Profile
+        <input id="profile-import-input" type="file" accept=".json" style="display:none;" />
+      </label>
+    </div>
+    <div id="profile-backup-info" style="font-size:11px;color:#666;"></div>
+  `;
+  panel.appendChild(section);
+
+  // Export
+  document.getElementById('profile-export-btn').addEventListener('click', () => {
+    autoBackup.exportJSON();
+    showToast('Profile exported!');
+  });
+
+  // Import
+  document.getElementById('profile-import-input').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      await autoBackup.importJSON(file);
+      showToast('Profile imported! Home is refreshing…');
+      state.homeLoaded = false;
+      loadHome();
+    } catch(err) {
+      showToast('Import failed — invalid file');
+    }
+    e.target.value = ''; // reset so same file can be re-selected
+  });
+
+  // Show last backup timestamp
+  autoBackup._get('snapshot').then(snap => {
+    const el = document.getElementById('profile-backup-info');
+    if (!el || !snap?.savedAt) return;
+    const d = new Date(snap.savedAt);
+    el.textContent = `Last backup: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+  });
 }
 
 // Podcast functionality
@@ -9109,10 +9375,21 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize podcasts
   initPodcasts();
 
-  // Initialize user profiles
+  // Initialize user profiles and backup UI
   initUserProfiles();
+  _initProfileBackupUI();
 
-  init();
+  // Restore from IndexedDB if localStorage was purged (iOS 7-day purge, cache clear, etc.)
+  // Give restore up to 500ms head-start so profile data is ready before home renders.
+  // IndexedDB reads are typically < 20ms so this almost never adds visible delay.
+  Promise.race([
+    autoBackup.restore(),
+    new Promise(resolve => setTimeout(() => resolve(false), 500))
+  ]).then(restored => {
+    if (restored) showToast('Profile restored from backup');
+  }).catch(() => {}).finally(() => {
+    init();
+  });
 
   // Recovery: if app remains hidden after initialization, force-show at 1.5s / 4s / 8s.
   // The 8-second hard recovery also dismisses stuck dialogs (profile / language) that
@@ -9158,4 +9435,32 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => _uiRecovery(false), 1500);  // soft: only fires if no dialog visible
   setTimeout(() => _uiRecovery(false), 4000);  // second soft attempt
   setTimeout(() => _uiRecovery(true),  8000);  // hard: clears stuck dialogs, forces show
+});
+
+// ===== bfcache fix =====
+// Mobile browsers (iOS Safari, Android Chrome) restore the DOM from a snapshot
+// when the user switches back to the tab or reopens from the homescreen.
+// In that case DOMContentLoaded never fires again, leaving the splash visible.
+// `pageshow` fires on EVERY page presentation, including bfcache restores.
+window.addEventListener('pageshow', (event) => {
+  if (!event.persisted) return; // normal navigation — DOMContentLoaded handles this
+  console.log('[bfcache] Page restored from cache — re-surfacing app');
+
+  // Remove stale splash that is still in the cached DOM
+  const splash = $('#splash');
+  if (splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 300); }
+
+  // Make app visible in case it was hidden in the snapshot
+  const app = $('#app');
+  if (app) app.classList.remove('hidden');
+
+  // Reset so home sections re-render (picks up any newly synced profile data)
+  state.homeLoaded = false;
+
+  if (appInitialized) {
+    updateGreeting?.();
+    loadHome?.();
+  } else {
+    init?.();
+  }
 });
