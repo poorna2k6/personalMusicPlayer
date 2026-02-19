@@ -784,6 +784,7 @@ function toggleLike(track) {
   localStorage.setItem('raagam_liked', JSON.stringify(state.liked));
   updateLikeButtons();
   updateLibraryCounts();
+  profileSync.scheduleSave(); // persist liked songs to cloud
 }
 
 function addToRecent(track) {
@@ -7076,6 +7077,7 @@ function openSettings() {
   if (settingsLang) settingsLang.value = CONFIG.preferredLanguage || 'hindi';
   updateHealthStatusUI();
   updateSleepTimerUI();
+  _refreshCloudSyncUI(); // reflect current sync connection state
   // Update EQ and Speed labels in settings
   const settingsEq = $('#settings-eq');
   if (settingsEq) settingsEq.textContent = state.eqPreset === 'off' ? 'Off' : state.eqPreset.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -8108,6 +8110,279 @@ function populateUserProfileDialog() {
 
 function saveUserProfile() {
   localStorage.setItem('raagam_user_profile', JSON.stringify(state.userProfile));
+  profileSync.scheduleSave();
+}
+
+// ===== Cloud Profile Sync — GitHub Gist =====
+// Stores liked songs, history, playlists & preferences in a private GitHub Gist.
+// Zero backend — works entirely on GitHub's free API with a personal access token.
+const profileSync = {
+  gistId:       localStorage.getItem('raagam_gist_id')    || null,
+  token:        localStorage.getItem('raagam_gist_token') || null,
+  _saveTimeout: null,
+  _syncing:     false,
+
+  get configured() { return !!(this.gistId && this.token); },
+
+  // On startup: load remote profile and merge it with local state
+  async init() {
+    if (!this.configured || this._syncing) return;
+    this._syncing = true;
+    try {
+      const remote = await this._fetchGist();
+      if (remote) {
+        this._mergeRemote(remote);
+        console.log('[Cloud Sync] Profile merged from Gist');
+      }
+    } catch(e) {
+      console.warn('[Cloud Sync] Load failed:', e.message);
+    } finally {
+      this._syncing = false;
+    }
+  },
+
+  // First-time setup: validates token, creates secret gist, stores gist ID locally
+  async connect(token) {
+    if (!token?.trim()) throw new Error('Token cannot be empty');
+    token = token.trim();
+
+    // Verify token by fetching authenticated user
+    const me = await fetch('https://api.github.com/user', {
+      headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }
+    });
+    if (!me.ok) throw new Error(`Invalid token — please create one with "gist" scope`);
+    const user = await me.json();
+
+    // Create the gist with current profile snapshot
+    const res = await fetch('https://api.github.com/gists', {
+      method: 'POST',
+      headers: { 'Authorization': `token ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        description: `Raagam Music Player — profile sync for @${user.login}`,
+        public: false,
+        files: { 'raagam-profile.json': { content: JSON.stringify(this._buildPayload(), null, 2) } }
+      })
+    });
+    if (!res.ok) throw new Error(`Could not create Gist (HTTP ${res.status})`);
+    const gist = await res.json();
+
+    this.token  = token;
+    this.gistId = gist.id;
+    localStorage.setItem('raagam_gist_token', token);
+    localStorage.setItem('raagam_gist_id',    gist.id);
+    return { login: user.login, gistUrl: gist.html_url };
+  },
+
+  // Remove credentials — data stays in the gist on GitHub but won't auto-save
+  disconnect() {
+    this.token  = null;
+    this.gistId = null;
+    localStorage.removeItem('raagam_gist_token');
+    localStorage.removeItem('raagam_gist_id');
+  },
+
+  // Debounced save — batches rapid changes (e.g. quick like/unlike) into one PATCH call
+  scheduleSave() {
+    if (!this.configured) return;
+    clearTimeout(this._saveTimeout);
+    this._saveTimeout = setTimeout(() => this.save(), 4000);
+  },
+
+  async save() {
+    if (!this.configured) return;
+    try {
+      await fetch(`https://api.github.com/gists/${this.gistId}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `token ${this.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: { 'raagam-profile.json': { content: JSON.stringify(this._buildPayload(), null, 2) } }
+        })
+      });
+    } catch(e) {
+      console.warn('[Cloud Sync] Save failed:', e.message);
+    }
+  },
+
+  async _fetchGist() {
+    const res = await fetch(`https://api.github.com/gists/${this.gistId}`, {
+      headers: { 'Authorization': `token ${this.token}` }
+    });
+    if (!res.ok) return null;
+    const gist = await res.json();
+    const content = gist.files?.['raagam-profile.json']?.content;
+    return content ? JSON.parse(content) : null;
+  },
+
+  _buildPayload() {
+    return {
+      version:        2,
+      savedAt:        new Date().toISOString(),
+      profile:        state.userProfile,
+      language:       CONFIG.preferredLanguage,
+      liked:          state.liked,
+      playlists:      state.playlists,
+      recent:         state.recent.slice(0, 50),
+      favoriteGenres: state.favoriteGenres,
+      skipSignals:    state.skipSignals,
+      theme:          state.currentTheme,
+    };
+  },
+
+  // Merge remote data into local state — union strategy, local takes precedence for conflicts
+  _mergeRemote(remote) {
+    if (!remote) return;
+
+    // Liked songs — union, deduped by track ID
+    if (remote.liked?.length) {
+      const localIds = new Set(state.liked.map(t => t.id));
+      remote.liked.forEach(t => { if (!localIds.has(t.id)) { state.liked.push(t); localIds.add(t.id); } });
+      localStorage.setItem('raagam_liked', JSON.stringify(state.liked));
+    }
+
+    // Playlists — take remote if local has none
+    if (remote.playlists?.length && !state.playlists.length) {
+      state.playlists = remote.playlists;
+      localStorage.setItem('raagam_playlists', JSON.stringify(state.playlists));
+    }
+
+    // Play history — union, dedup, keep most recent 50
+    if (remote.recent?.length) {
+      const seen = new Set(state.recent.map(t => t.id));
+      remote.recent.forEach(t => { if (!seen.has(t.id)) { state.recent.push(t); seen.add(t.id); } });
+      state.recent = state.recent.slice(0, 50);
+      localStorage.setItem('raagam_recent', JSON.stringify(state.recent));
+    }
+
+    // Language — apply remote only when local has none set
+    if (remote.language && !CONFIG.preferredLanguage) {
+      CONFIG.preferredLanguage = remote.language;
+      localStorage.setItem('raagam_language', remote.language);
+      state.languageSetupComplete = true;
+      localStorage.setItem('raagam_language_setup', 'true');
+    }
+
+    // Invalidate home cache so it re-renders with the merged liked/history data
+    state.homeLoaded = false;
+    try { updateLikeButtons(); } catch(_) {}
+    try { updateLibraryCounts(); } catch(_) {}
+  }
+};
+
+// ───────────────────────────────────────────────────────────────────────────
+// Cloud Sync Settings UI — injected once into the settings panel
+// ───────────────────────────────────────────────────────────────────────────
+function _initCloudSyncUI() {
+  const panel = $('#settings-panel');
+  if (!panel || document.getElementById('cloud-sync-section')) return;
+
+  const section = document.createElement('div');
+  section.id = 'cloud-sync-section';
+  section.className = 'setting-item';
+  section.style.cssText = 'flex-direction:column;align-items:stretch;gap:10px;';
+  section.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="display:flex;align-items:center;gap:6px;font-weight:600;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
+        Cloud Sync
+      </span>
+      <span id="cloud-sync-badge" style="font-size:11px;color:#1DB954;font-weight:600;display:none;">Connected</span>
+    </div>
+
+    <!-- Disconnected state -->
+    <div id="cloud-sync-off">
+      <p style="font-size:12px;color:#b3b3b3;margin:0 0 8px;">
+        Sync liked songs, playlists &amp; history across all your devices using a free <b>private GitHub Gist</b>.
+      </p>
+      <div style="display:flex;gap:8px;">
+        <input id="cloud-sync-token-input" type="password"
+          placeholder="GitHub token (gist scope)"
+          style="flex:1;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);
+                 padding:8px 10px;border-radius:8px;font-size:12px;outline:none;" />
+        <button id="cloud-sync-connect-btn"
+          style="background:#1DB954;color:#000;border:none;padding:8px 14px;border-radius:8px;
+                 font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
+          Connect
+        </button>
+      </div>
+      <p style="font-size:10px;color:#666;margin:6px 0 0;">
+        Needs a token with <b>gist</b> scope only.
+        <a href="https://github.com/settings/tokens/new?scopes=gist&description=Raagam+Music+Sync"
+           target="_blank" rel="noopener" style="color:#1DB954;">Create one &rarr;</a>
+      </p>
+    </div>
+
+    <!-- Connected state -->
+    <div id="cloud-sync-on" style="display:none;">
+      <p style="font-size:12px;color:#b3b3b3;margin:0 0 8px;">
+        Your liked songs, playlists &amp; history auto-save to a private Gist and load on every device you sign into.
+      </p>
+      <div style="display:flex;gap:8px;">
+        <button id="cloud-sync-save-now-btn"
+          style="flex:1;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);
+                 padding:8px;border-radius:8px;font-size:12px;cursor:pointer;">
+          Save Now
+        </button>
+        <button id="cloud-sync-disconnect-btn"
+          style="background:#dc2626;color:#fff;border:none;padding:8px 14px;border-radius:8px;
+                 font-size:12px;font-weight:700;cursor:pointer;">
+          Disconnect
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Insert near end of settings panel (before last setting-item which is the about/version text)
+  panel.appendChild(section);
+
+  // Wire up Connect
+  document.getElementById('cloud-sync-connect-btn').addEventListener('click', async () => {
+    const btn   = document.getElementById('cloud-sync-connect-btn');
+    const input = document.getElementById('cloud-sync-token-input');
+    const token = input.value.trim();
+    if (!token) { showToast('Paste your GitHub token first'); return; }
+    btn.textContent = 'Connecting…';
+    btn.disabled = true;
+    try {
+      const { login } = await profileSync.connect(token);
+      input.value = '';
+      _refreshCloudSyncUI();
+      showToast(`Cloud Sync connected as @${login}`);
+    } catch(e) {
+      btn.textContent = 'Connect';
+      btn.disabled = false;
+      showToast(e.message);
+    }
+  });
+
+  // Wire up Save Now
+  document.getElementById('cloud-sync-save-now-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('cloud-sync-save-now-btn');
+    btn.textContent = 'Saving…';
+    btn.disabled = true;
+    await profileSync.save();
+    btn.textContent = 'Saved!';
+    setTimeout(() => { btn.textContent = 'Save Now'; btn.disabled = false; }, 2000);
+  });
+
+  // Wire up Disconnect
+  document.getElementById('cloud-sync-disconnect-btn').addEventListener('click', () => {
+    profileSync.disconnect();
+    _refreshCloudSyncUI();
+    showToast('Cloud Sync disconnected');
+  });
+
+  _refreshCloudSyncUI();
+}
+
+function _refreshCloudSyncUI() {
+  const badge = document.getElementById('cloud-sync-badge');
+  const onEl  = document.getElementById('cloud-sync-on');
+  const offEl = document.getElementById('cloud-sync-off');
+  if (!badge) return;
+  const connected = profileSync.configured;
+  badge.style.display = connected ? 'inline' : 'none';
+  onEl.style.display  = connected ? 'block'  : 'none';
+  offEl.style.display = connected ? 'none'   : 'block';
 }
 
 // Podcast functionality
@@ -9111,6 +9386,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize user profiles
   initUserProfiles();
+  _initCloudSyncUI();
+
+  // Load remote profile (liked songs, history, playlists) from GitHub Gist if configured.
+  // Runs async — home renders with local data immediately; merged cloud data refreshes it.
+  profileSync.init().catch(() => {});
 
   init();
 
@@ -9158,4 +9438,32 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => _uiRecovery(false), 1500);  // soft: only fires if no dialog visible
   setTimeout(() => _uiRecovery(false), 4000);  // second soft attempt
   setTimeout(() => _uiRecovery(true),  8000);  // hard: clears stuck dialogs, forces show
+});
+
+// ===== bfcache fix =====
+// Mobile browsers (iOS Safari, Android Chrome) restore the DOM from a snapshot
+// when the user switches back to the tab or reopens from the homescreen.
+// In that case DOMContentLoaded never fires again, leaving the splash visible.
+// `pageshow` fires on EVERY page presentation, including bfcache restores.
+window.addEventListener('pageshow', (event) => {
+  if (!event.persisted) return; // normal navigation — DOMContentLoaded handles this
+  console.log('[bfcache] Page restored from cache — re-surfacing app');
+
+  // Remove stale splash that is still in the cached DOM
+  const splash = $('#splash');
+  if (splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 300); }
+
+  // Make app visible in case it was hidden in the snapshot
+  const app = $('#app');
+  if (app) app.classList.remove('hidden');
+
+  // Reset so home sections re-render (picks up any newly synced profile data)
+  state.homeLoaded = false;
+
+  if (appInitialized) {
+    updateGreeting?.();
+    loadHome?.();
+  } else {
+    init?.();
+  }
 });
