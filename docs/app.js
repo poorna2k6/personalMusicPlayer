@@ -6818,11 +6818,53 @@ function showFeatureTour() {
           </div>
         </div>
 
+        <div class="ft-category">📱 v3.8 — 19 Feb 2026</div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">☁️</div>
+          <div class="ft-card-info">
+            <h4>Cross-Device Cloud Sync <span class="ft-badge-new">NEW</span></h4>
+            <p>Your liked songs, playlists and history now sync automatically across all your devices. Uses Firebase — pre-configured and ready. Settings → Cloud Sync to see status or pull manually.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">📲</div>
+          <div class="ft-card-info">
+            <h4>Email/Phone Profile Identity <span class="ft-badge-new">NEW</span></h4>
+            <p>Your email or phone is now your sync identity — log into Raagam on any device with the same email/phone and your entire library follows you automatically.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">⬇️</div>
+          <div class="ft-card-info">
+            <h4>Offline Downloads <span class="ft-badge-new">NEW</span></h4>
+            <p>Download any song for offline playback. Tap the Download button in Now Playing (extra controls row) or the ↓ icon on any search result. Find all downloads in Library → Downloads. Shows storage used.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">🎧</div>
+          <div class="ft-card-info">
+            <h4>DJ Mixer Plays in Background <span class="ft-badge-new">NEW</span></h4>
+            <p>DJ mode now keeps playing when you minimize the app or lock your phone — just like the main music player. OS lock screen shows the DJ track with play/pause/skip controls.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">▶️</div>
+          <div class="ft-card-info">
+            <h4>Smarter Auto-play Next <span class="ft-badge-new">NEW</span></h4>
+            <p>Auto-play now falls back to your Liked Songs or Recently Played when API recommendations fail — music never stops unexpectedly.</p>
+          </div>
+        </div>
+
         <div class="ft-footer">
           <button class="ft-start-btn" onclick="this.closest('.feature-tour-overlay').remove()">
             🎵 Start Listening
           </button>
-          <p class="ft-footer-note">You can revisit this guide anytime from <strong>Settings → App Features</strong></p>
+          <p class="ft-footer-note">You can revisit this guide anytime from <strong>Settings → App Features &amp; Guide</strong></p>
         </div>
 
       </div>
@@ -6831,7 +6873,7 @@ function showFeatureTour() {
   document.body.appendChild(overlay);
 
   // Mark as seen
-  localStorage.setItem('raagam_feature_tour_seen', 'true');
+  localStorage.setItem('raagam_feature_tour_v38', 'true');
 
   // Close on backdrop click
   overlay.addEventListener('click', (e) => {
@@ -7298,7 +7340,9 @@ function openSettings() {
   if (settingsLang) settingsLang.value = CONFIG.preferredLanguage || 'hindi';
   updateHealthStatusUI();
   updateSleepTimerUI();
-  // (cloud sync UI removed — profile backup is automatic)
+  // Inject cloud sync + backup sections if not already present (idempotent calls)
+  _initCloudSyncUI();
+  _initProfileBackupUI();
   // Update EQ and Speed labels in settings
   const settingsEq = $('#settings-eq');
   if (settingsEq) settingsEq.textContent = state.eqPreset === 'off' ? 'Off' : state.eqPreset.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -8107,7 +8151,7 @@ function init() {
     setupThemePicker();
 
     // Show feature tour for first-time users (after a short delay so UI loads)
-    if (!localStorage.getItem('raagam_feature_tour_seen')) {
+    if (!localStorage.getItem('raagam_feature_tour_v38')) {
       setTimeout(() => showFeatureTour(), 1200);
     }
 
@@ -8707,10 +8751,18 @@ function _updateCloudSyncStatus(status, detail) {
   el.style.color = s.color;
 }
 
+// Default Firebase URL — pre-configured for this app
+const _DEFAULT_CLOUD_URL = 'https://raaga-db-default-rtdb.firebaseio.com';
+
 // Injected into Settings panel — Cloud Sync section
 function _initCloudSyncUI() {
   const panel = $('#settings-panel');
   if (!panel || document.getElementById('cloud-sync-section')) return;
+
+  // Auto-save default Firebase URL on first load if not already configured
+  if (!localStorage.getItem('raagam_cloud_url')) {
+    localStorage.setItem('raagam_cloud_url', _DEFAULT_CLOUD_URL);
+  }
 
   const section = document.createElement('div');
   section.id = 'cloud-sync-section';
