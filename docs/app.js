@@ -9833,3 +9833,239 @@ window.addEventListener('pageshow', (event) => {
   }
 
 })(); // end initFirebaseSync IIFE
+
+// ===== AI PERSONALIZED RECOMMENDATIONS ENGINE =====
+(function initAIRecommendations() {
+  const CACHE_KEY = 'raagam_ai_recs';
+  const CACHE_TS_KEY = 'raagam_ai_recs_ts';
+  const REFRESH_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  // ── Wait for app to be ready ──────────────────────────────────────────
+  function waitAndStart() {
+    if (document.readyState !== 'complete' && document.readyState !== 'interactive') {
+      document.addEventListener('DOMContentLoaded', tryLoad);
+    } else {
+      setTimeout(tryLoad, 1500); // small delay so app.js history loads first
+    }
+  }
+
+  function tryLoad() {
+    const cached = loadCache();
+    if (cached) {
+      renderAIPicks(cached);
+    }
+    // Check if 24hrs passed → refresh silently in background
+    const lastTs = parseInt(localStorage.getItem(CACHE_TS_KEY) || '0');
+    if (Date.now() - lastTs > REFRESH_MS) {
+      generateRecs();
+    }
+    wireButtons();
+  }
+
+  // ── Cache helpers ─────────────────────────────────────────────────────
+  function loadCache() {
+    try { return JSON.parse(localStorage.getItem(CACHE_KEY)); } catch { return null; }
+  }
+  function saveCache(data) {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    localStorage.setItem(CACHE_TS_KEY, String(Date.now()));
+  }
+
+  // ── Wire "Get New" / "✨ New" buttons ─────────────────────────────────
+  function wireButtons() {
+    const homeBtn = document.getElementById('ai-picks-refresh-btn');
+    const libBtn = document.getElementById('ai-picks-library-refresh');
+    [homeBtn, libBtn].forEach(btn => {
+      if (btn) btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        generateRecs(true); // force fresh
+      });
+    });
+
+    // Library card click → open the AI picks detail
+    const libCard = document.getElementById('ai-picks-library-card');
+    if (libCard) libCard.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      const cached = loadCache();
+      if (cached && cached.resolvedTracks && cached.resolvedTracks.length > 0) {
+        openAIPicksDetail(cached);
+      }
+    });
+  }
+
+  // ── Generate fresh recommendations via AI worker ──────────────────────
+  function generateRecs(forced = false) {
+    if (!CONFIG.aiApiKey) return; // No API key configured
+    if (!window.aiWorker && typeof initAIWorker === 'function') initAIWorker();
+    if (!window.aiWorker) return;
+
+    const history = (state.history || []).slice(0, 30);
+    const liked = (state.liked || []).slice(0, 20);
+    const language = CONFIG.preferredLanguage || 'hindi';
+
+    // Show loading state
+    setLoadingState(true);
+
+    window.aiWorker.postMessage({
+      type: 'PERSONALIZED_RECS',
+      payload: { history, likedSongs: liked, language },
+      apiKey: CONFIG.aiApiKey
+    });
+
+    // Listen for response — attach once per request
+    const onMsg = async (e) => {
+      if (e.data.type === 'RECS_GENERATED') {
+        window.aiWorker.removeEventListener('message', onMsg);
+        const result = e.data.payload;
+        if (!result || !Array.isArray(result.songs)) { setLoadingState(false); return; }
+        // Resolve songs to playable tracks
+        const resolvedTracks = await resolveSongs(result.songs);
+        const fullData = { ...result, resolvedTracks, generatedAt: Date.now() };
+        saveCache(fullData);
+        setLoadingState(false);
+        renderAIPicks(fullData);
+      } else if (e.data.type === 'ERROR') {
+        window.aiWorker.removeEventListener('message', onMsg);
+        setLoadingState(false);
+        console.warn('[AI Recs] Worker error:', e.data.payload);
+      }
+    };
+    window.aiWorker.addEventListener('message', onMsg);
+  }
+
+  // ── Resolve song text → playable tracks via existing search ──────────
+  async function resolveSongs(songs) {
+    const resolved = [];
+    for (const item of songs) {
+      try {
+        const results = await apiSearch(item.query || `${item.song} ${item.artist}`, 1);
+        if (results && results.length > 0) {
+          resolved.push({ ...results[0], _aiSong: item.song, _aiArtist: item.artist }); // keep AI meta
+        }
+      } catch { /* skip unresolvable tracks */ }
+      if (resolved.length >= 10) break;
+    }
+    return resolved;
+  }
+
+  // ── Loading state ─────────────────────────────────────────────────────
+  function setLoadingState(loading) {
+    const homeBtn = document.getElementById('ai-picks-refresh-btn');
+    const libBtn = document.getElementById('ai-picks-library-refresh');
+    if (homeBtn) homeBtn.textContent = loading ? '⏳ Loading...' : '✨ Get New';
+    if (libBtn) libBtn.textContent = loading ? '⏳' : '✨ New';
+    const libCount = document.getElementById('ai-picks-library-count');
+    if (loading && libCount) libCount.textContent = 'Asking Gemini...';
+  }
+
+  // ── Render picks on Home + update Library card ────────────────────────
+  function renderAIPicks(data) {
+    if (!data || !data.resolvedTracks || data.resolvedTracks.length === 0) return;
+
+    const playlistName = data.playlistName || '✨ AI Picks for You';
+    const tagline = data.tagline || '';
+    const tracks = data.resolvedTracks;
+
+    // ── Home section ──────────────────────────────────────────────────
+    const homeSection = document.getElementById('section-ai-picks');
+    const homeRow = document.getElementById('ai-picks-row');
+    const titleEl = document.getElementById('ai-picks-section-title');
+    const taglineEl = document.getElementById('ai-picks-tagline');
+
+    if (homeSection && homeRow) {
+      homeSection.style.display = '';
+      if (titleEl) titleEl.textContent = `✨ ${playlistName}`;
+      if (taglineEl) taglineEl.textContent = tagline;
+      homeRow.innerHTML = '';
+      tracks.forEach((track, i) => {
+        const card = document.createElement('div');
+        card.className = 'song-card';
+        card.style.cssText = 'flex-shrink:0;width:140px;cursor:pointer;';
+        const imgSrc = getImage(track, 'low') || '';
+        card.innerHTML = `
+          <div style="position:relative;width:140px;height:140px;border-radius:12px;overflow:hidden;background:#282828;margin-bottom:6px;">
+            ${imgSrc ? `<img src="${imgSrc}" style="width:100%;height:100%;object-fit:cover;" loading="lazy" />` : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:36px;">🎵</div>'}
+            <div style="position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,0.7);border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+            </div>
+          </div>
+          <p style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;">${track.title || track.song || 'Unknown'}</p>
+          <p style="font-size:11px;color:#b3b3b3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:2px 0 0;">${track.artist || 'Unknown'}</p>
+        `;
+        card.addEventListener('click', () => {
+          const queue = [...tracks];
+          state.queue = queue;
+          state.queueIndex = i;
+          playSong(track, false);
+        });
+        homeRow.appendChild(card);
+      });
+    }
+
+    // ── Library card ─────────────────────────────────────────────────
+    const libCard = document.getElementById('ai-picks-library-card');
+    const libName = document.getElementById('ai-picks-library-name');
+    const libCount = document.getElementById('ai-picks-library-count');
+    if (libCard) {
+      libCard.style.display = '';
+      if (libName) libName.textContent = `✨ ${playlistName}`;
+      if (libCount) libCount.textContent = `${tracks.length} song${tracks.length !== 1 ? 's' : ''} · AI curated`;
+    }
+  }
+
+  // ── Full-screen detail when Library card is tapped ────────────────────
+  function openAIPicksDetail(data) {
+    const tracks = data.resolvedTracks;
+    const listEl = document.getElementById('playlist-detail-list');
+    if (!listEl) return;
+    listEl.classList.remove('hidden');
+    document.getElementById('liked-list')?.classList.add('hidden');
+    document.getElementById('recent-list')?.classList.add('hidden');
+    document.getElementById('history-list')?.classList.add('hidden');
+    listEl.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'track-list-header';
+    header.innerHTML = `
+      <h3 style="background:linear-gradient(135deg,#7c3aed,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">✨ ${data.playlistName}</h3>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <p style="font-size:12px;color:#b3b3b3;margin:2px 0;">${data.tagline || ''}</p>
+        ${tracks.length > 0 ? '<button class="playlist-play-all" style="background:#1DB954;color:#000;border:none;border-radius:16px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">Play All</button>' : ''}
+        <button class="back-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          Close
+        </button>
+      </div>
+    `;
+    header.querySelector('.back-btn').addEventListener('click', () => listEl.classList.add('hidden'));
+    const playAllBtn = header.querySelector('.playlist-play-all');
+    if (playAllBtn) playAllBtn.addEventListener('click', () => {
+      state.queue = [...tracks]; state.queueIndex = 0;
+      playSong(tracks[0], false);
+      showToast(`Playing ✨ ${data.playlistName}`);
+    });
+    listEl.appendChild(header);
+
+    tracks.forEach((track, i) => {
+      const row = document.createElement('div');
+      row.className = 'track-item';
+      row.style.cursor = 'pointer';
+      const img = getImage(track, 'low');
+      row.innerHTML = `
+        <div class="track-num" style="color:#7c3aed;font-weight:700;">${i + 1}</div>
+        ${img ? `<img class="track-art" src="${img}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;" loading="lazy"/>` : '<div class="track-art" style="width:40px;height:40px;border-radius:6px;background:#333;display:flex;align-items:center;justify-content:center;font-size:18px;">🎵</div>'}
+        <div class="track-info">
+          <p class="track-title">${track.title || track.song || 'Unknown'}</p>
+          <p class="track-artist">${track.artist || 'Unknown'}</p>
+        </div>
+      `;
+      row.addEventListener('click', () => {
+        state.queue = [...tracks]; state.queueIndex = i;
+        playSong(track, false);
+      });
+      listEl.appendChild(row);
+    });
+  }
+
+  waitAndStart();
+})(); // end initAIRecommendations IIFE

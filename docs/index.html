@@ -180,6 +180,19 @@
       <!-- Home View -->
       <div id="view-home" class="view active">
         <div class="quick-picks" id="quick-picks"></div>
+        <!-- AI Picks Section (Home) -->
+        <section class="section" id="section-ai-picks" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div>
+              <h2 class="section-title" id="ai-picks-section-title" style="margin:0;">✨ AI Picks for You</h2>
+              <p id="ai-picks-tagline" style="font-size:12px;color:#b3b3b3;margin:2px 0 0;"></p>
+            </div>
+            <button id="ai-picks-refresh-btn"
+              style="background:linear-gradient(135deg,#7c3aed,#06b6d4);color:#fff;border:none;border-radius:16px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">✨
+              Get New</button>
+          </div>
+          <div class="scroll-row" id="ai-picks-row"></div>
+        </section>
         <section class="section" id="section-daily-mixes">
           <h2 class="section-title">Your Daily Mixes</h2>
           <div class="scroll-row mix-row" id="daily-mixes-row"></div>
@@ -325,6 +338,21 @@
           <div id="liked-list" class="track-list hidden"></div>
           <div id="recent-list" class="track-list hidden"></div>
           <div id="history-list" class="track-list hidden"></div>
+          <!-- AI Picks Library Card -->
+          <div id="ai-picks-library-card" class="library-item" style="display:none;cursor:pointer;">
+            <div
+              style="width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,#7c3aed,#06b6d4);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <span style="font-size:24px;">✨</span>
+            </div>
+            <div class="library-item-info" style="flex:1;min-width:0;">
+              <h3 id="ai-picks-library-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">AI Picks
+                for You</h3>
+              <p id="ai-picks-library-count">Generating...</p>
+            </div>
+            <button id="ai-picks-library-refresh"
+              style="background:linear-gradient(135deg,#7c3aed,#06b6d4);color:#fff;border:none;border-radius:12px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;flex-shrink:0;">✨
+              New</button>
+          </div>
           <!-- Custom Playlists -->
           <div id="playlist-cards"></div>
           <div id="playlist-detail-list" class="track-list hidden"></div>
