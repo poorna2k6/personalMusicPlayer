@@ -1,5 +1,5 @@
 // Raagam Service Worker — Alarm & Caching
-const CACHE_NAME = 'raagam-v3.6';
+const CACHE_NAME = 'raagam-v3.7';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -40,8 +40,8 @@ self.addEventListener('fetch', (event) => {
   // Only handle same-origin requests
   if (url.origin !== self.location.origin) return;
 
-  // Skip API calls — let them go to network directly
-  if (url.pathname.includes('/api/')) return;
+  // Skip API calls and AI worker — let them go to network directly
+  if (url.pathname.includes('/api/') || url.pathname.includes('ai-worker.js')) return;
 
   event.respondWith(
     fetch(event.request)
@@ -140,7 +140,7 @@ async function fireAlarmNotification(alarmId, songName) {
   const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   for (const client of clients) {
     client.postMessage({ type: 'ALARM_FIRED', alarmId });
-    try { client.focus(); } catch (e) {}
+    try { client.focus(); } catch (e) { }
   }
 }
 

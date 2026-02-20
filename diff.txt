@@ -1,0 +1,110 @@
+diff --git a/docs/app.js b/docs/app.js
+index 85fc1c4..10239c9 100644
+--- a/docs/app.js
++++ b/docs/app.js
+@@ -4,6 +4,7 @@
+ const $ = (s) => document.querySelector(s);
+ const $$ = (s) => document.querySelectorAll(s);
+ const audio = document.querySelector('#audio');
++let aiWorker;
+ 
+ // ===== Safe localStorage helper — prevents black screen from corrupted data =====
+ function safeParse(key, fallback) {
+@@ -45,7 +46,8 @@ const CONFIG = {
+     'bhojpuri': { name: 'Bhojpuri', keywords: ['bhojpuri', 'bihar', 'uttar pradesh'] },
+     'english': { name: 'English', keywords: ['english', 'western', 'pop', 'rock', 'jazz'] },
+     'all': { name: 'All Languages', keywords: [] }
+-  }
++  },
++  aiApiKey: 'AIzaSyBTYjUYHDUCbZZ1QEHmhYwKdw-8u_yYPxI' // User provided Gemini Key
+ };
+ 
+ // ===== State =====
+@@ -1560,8 +1562,33 @@ function renderSkeletons(container, count = 5) {
+   }
+ }
+ 
+-function renderLoader() {
+-  return '<div class="loader"><div class="spinner"></div></div>';
++// ===== AI Worker Setup =====
++function initAIWorker() {
++  if (!aiWorker) {
++    aiWorker = new Worker('ai-worker.js?v=' + Date.now());
++    aiWorker.onerror = (e) => {
++      console.error('[Main] AI Worker Error:', e.message, 'in', e.filename, 'line', e.lineno);
++    };
++    aiWorker.onmessage = (e) => {
++      const { type, payload } = e.data;
++      if (type === 'LOG') {
++        console.log(payload);
++        document.title = "Worker LOG: " + payload; // Debug
++        return;
++      }
++      if (type === 'PLAYLIST_GENERATED') {
++        playSmartPlaylist(payload);
++      } else if (type === 'DAILY_MIX_GENERATED') {
++        renderDailyMixes(payload);
++      } else if (type === 'SEARCH_ANALYZED') {
++        handleSmartSearchResults(payload);
++      } else if (type === 'ERROR') {
++        console.error('AI Error:', payload);
++        state.smartDJBusy = false;
++        updateSmartDJUI();
++      }
++    };
++  }
+ }
+ 
+ // ===== Home Page =====
+@@ -1701,6 +1728,24 @@ function setupSearch() {
+     searchDebounce = setTimeout(() => performSearch(q), 400);
+   });
+ 
++  input.addEventListener('keypress', (e) => {
++    if (e.key === 'Enter') {
++      const q = input.value.trim();
++      if (!q) return;
++      // Smart Search Trigger: Long query (> 3 words or > 15 chars) + AI Key present
++      if (CONFIG.aiApiKey && (q.length > 20 || q.split(' ').length > 3)) {
++        clearTimeout(searchDebounce);
++        showToast('Asking AI...');
++        state.smartDJBusy = true;
++        resultsContainer.innerHTML = `<div style="padding:40px;text-align:center;"><p style="color:#888;margin-bottom:20px;">Analyzing your request...</p>${renderLoader()}</div>`;
++        if (!aiWorker) initAIWorker();
++        aiWorker.postMessage({ type: 'INTELLIGENT_SEARCH', payload: { query: q }, apiKey: CONFIG.aiApiKey });
++      } else {
++        performSearch(q); // Force immediate search
++      }
++    }
++  });
++
+   clearBtn.addEventListener('click', () => {
+     input.value = '';
+     clearBtn.classList.add('hidden');
+@@ -1780,6 +1825,26 @@ function renderSearchTabs(container, query) {
+   });
+ }
+ 
++function handleSmartSearchResults(result) {
++  state.smartDJBusy = false;
++  const input = $('#search-input');
++
++  if (result.isNaturalLanguage) {
++    const q = result.searchQuery;
++    showToast(`AI: Searching for "${q}"`);
++    if (input) input.value = q; // Update input logic
++
++    // Optional: Show mood/artist toast
++    if (result.mood) showToast(`Mood: ${result.mood}`);
++    if (result.artist) showToast(`Artist: ${result.artist}`);
++
++    performSearch(q);
++  } else {
++    // Fallback if AI thinks it's not a complex request
++    performSearch(result.searchQuery || (input ? input.value : ''));
++  }
++}
++
+ async function performSearch(query) {
+   const resultsContainer = $('#search-results');
+   const languageFilter = $('#search-language-filter').value;

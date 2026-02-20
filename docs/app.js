@@ -4,6 +4,7 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 const audio = document.querySelector('#audio');
+let aiWorker;
 
 // ===== Safe localStorage helper — prevents black screen from corrupted data =====
 function safeParse(key, fallback) {
@@ -45,7 +46,8 @@ const CONFIG = {
     'bhojpuri': { name: 'Bhojpuri', keywords: ['bhojpuri', 'bihar', 'uttar pradesh'] },
     'english': { name: 'English', keywords: ['english', 'western', 'pop', 'rock', 'jazz'] },
     'all': { name: 'All Languages', keywords: [] }
-  }
+  },
+  aiApiKey: 'AIzaSyBTYjUYHDUCbZZ1QEHmhYwKdw-8u_yYPxI' // User provided Gemini Key
 };
 
 // ===== State =====
@@ -1378,7 +1380,11 @@ async function generateDailyMixes() {
   return mixes;
 }
 
-async function renderDailyMixes() {
+function renderLoader() {
+  return '<div class="loader"><div class="spinner"></div></div>';
+}
+
+async function renderDailyMixes(aiGeneratedMixes = null) {
   const container = $('#daily-mixes-row');
   if (!container) return;
 
@@ -1391,17 +1397,31 @@ async function renderDailyMixes() {
     </div>`).join('');
 
   try {
+    let mixes;
     const today = new Date().toDateString();
     const cacheKey = 'raagam_validated_mixes';
-    const cached = safeParse(cacheKey, null);
 
-    // Reuse today's validated mixes if available — zero API calls
-    if (cached?.date === today && cached?.mixes?.length) {
-      _renderValidatedMixCards(container, cached.mixes);
-      return;
+    if (aiGeneratedMixes) {
+      // We have new mixes from the AI Worker!
+      mixes = aiGeneratedMixes.map(mix => ({
+        id: `ai-mix-${Date.now()}-${Math.random()}`,
+        title: mix.title,
+        subtitle: mix.description,
+        icon: '✨',
+        gradient: `linear-gradient(135deg, ${mix.color || '#4f46e5'}, #1e1b4b)`,
+        query: `${CONFIG.preferredLanguage || 'hindi'} ${mix.vibe}`,
+        vibe: mix.vibe // custom data
+      }));
+    } else {
+      const cached = safeParse(cacheKey, null);
+      // Reuse today's validated mixes if available — zero API calls
+      if (cached?.date === today && cached?.mixes?.length) {
+        _renderValidatedMixCards(container, cached.mixes);
+        return;
+      }
+      mixes = await generateDailyMixes();
     }
 
-    const mixes = await generateDailyMixes();
     const MIN_TRACKS = 3;
 
     // Validate all mixes in parallel: only keep those that return >= MIN_TRACKS real tracks
@@ -1416,10 +1436,12 @@ async function renderDailyMixes() {
 
     const validMixes = validated.filter(Boolean);
 
-    // Cache validated mixes for the rest of the day
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify({ date: today, mixes: validMixes }));
-    } catch { }
+    // Cache validated mixes for the rest of the day (only if not AI generated)
+    if (!aiGeneratedMixes) {
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify({ date: today, mixes: validMixes }));
+      } catch { }
+    }
 
     _renderValidatedMixCards(container, validMixes);
   } catch (e) {
@@ -1447,8 +1469,23 @@ function _renderValidatedMixCards(container, mixes) {
 
   container.querySelectorAll('.mix-card').forEach(card => {
     const mix = mixes[parseInt(card.dataset.mixIdx, 10)];
-    const playHandler = async () => {
+    card.addEventListener('click', async () => {
       showToast(`Loading ${mix.title}...`);
+
+      // If AI mix with custom vibe, we use the original aiWorker to get a playlist
+      if (mix.vibe && CONFIG.aiApiKey) {
+        state.smartDJBusy = true;
+        updateSmartDJUI();
+        if (!aiWorker) initAIWorker();
+        aiWorker.postMessage({
+          type: 'GENERATE_PLAYLIST',
+          payload: { vibe: mix.vibe, language: CONFIG.preferredLanguage || 'hindi' },
+          apiKey: CONFIG.aiApiKey
+        });
+        return;
+      }
+
+      // Otherwise, standard offline mix handling
       // Start with pre-validated tracks; fetch more to fill out the queue
       let tracks = [...(mix.tracks || [])];
       if (tracks.length < 10) {
@@ -1461,10 +1498,8 @@ function _renderValidatedMixCards(container, mixes) {
       if (!tracks.length) { showToast('Could not load mix'); return; }
       state.queue = tracks; state.queueIndex = 0;
       playSong(tracks[0], false);
-      analytics.trackFeatureUsage('daily_mix_play', { mix: mix.title });
-    };
-    card.addEventListener('click', playHandler);
-    card.querySelector('.mix-play-btn')?.addEventListener('click', e => { e.stopPropagation(); playHandler(); });
+      renderQueue();
+    });
   });
 }
 
@@ -1560,8 +1595,33 @@ function renderSkeletons(container, count = 5) {
   }
 }
 
-function renderLoader() {
-  return '<div class="loader"><div class="spinner"></div></div>';
+// ===== AI Worker Setup =====
+function initAIWorker() {
+  if (!aiWorker) {
+    aiWorker = new Worker('ai-worker.js?v=' + Date.now());
+    aiWorker.onerror = (e) => {
+      console.error('[Main] AI Worker Error:', e.message, 'in', e.filename, 'line', e.lineno);
+    };
+    aiWorker.onmessage = (e) => {
+      const { type, payload } = e.data;
+      if (type === 'LOG') {
+        console.log(payload);
+        document.title = "Worker LOG: " + payload; // Debug
+        return;
+      }
+      if (type === 'PLAYLIST_GENERATED') {
+        playSmartPlaylist(payload);
+      } else if (type === 'DAILY_MIX_GENERATED') {
+        renderDailyMixes(payload);
+      } else if (type === 'SEARCH_ANALYZED') {
+        handleSmartSearchResults(payload);
+      } else if (type === 'ERROR') {
+        console.error('AI Error:', payload);
+        state.smartDJBusy = false;
+        updateSmartDJUI();
+      }
+    };
+  }
 }
 
 // ===== Home Page =====
@@ -1598,7 +1658,19 @@ async function loadHome() {
   }
 
   // Daily Mixes — async but shows skeletons immediately, only renders valid categories
-  renderDailyMixes();
+  if (CONFIG.aiApiKey) {
+    if (!aiWorker) initAIWorker();
+    aiWorker.postMessage({
+      type: 'GENERATE_DAILY_MIX',
+      payload: { language: CONFIG.preferredLanguage || 'hindi' },
+      apiKey: CONFIG.aiApiKey
+    });
+    // Render skeletons immediately while waiting for worker
+    renderDailyMixes();
+  } else {
+    // Fallback to local deterministic generator
+    renderDailyMixes();
+  }
 
   // ── API sections (cached for fast reload) ──────────────────────────────────
 
@@ -1701,6 +1773,24 @@ function setupSearch() {
     searchDebounce = setTimeout(() => performSearch(q), 400);
   });
 
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      const q = input.value.trim();
+      if (!q) return;
+      // Smart Search Trigger: Long query (> 3 words or > 15 chars) + AI Key present
+      if (CONFIG.aiApiKey && (q.length > 20 || q.split(' ').length > 3)) {
+        clearTimeout(searchDebounce);
+        showToast('Asking AI...');
+        state.smartDJBusy = true;
+        resultsContainer.innerHTML = `<div style="padding:40px;text-align:center;"><p style="color:#888;margin-bottom:20px;">Analyzing your request...</p>${renderLoader()}</div>`;
+        if (!aiWorker) initAIWorker();
+        aiWorker.postMessage({ type: 'INTELLIGENT_SEARCH', payload: { query: q }, apiKey: CONFIG.aiApiKey });
+      } else {
+        performSearch(q); // Force immediate search
+      }
+    }
+  });
+
   clearBtn.addEventListener('click', () => {
     input.value = '';
     clearBtn.classList.add('hidden');
@@ -1778,6 +1868,26 @@ function renderSearchTabs(container, query) {
       performSearch(query);
     });
   });
+}
+
+function handleSmartSearchResults(result) {
+  state.smartDJBusy = false;
+  const input = $('#search-input');
+
+  if (result.isNaturalLanguage) {
+    const q = result.searchQuery;
+    showToast(`AI: Searching for "${q}"`);
+    if (input) input.value = q; // Update input logic
+
+    // Optional: Show mood/artist toast
+    if (result.mood) showToast(`Mood: ${result.mood}`);
+    if (result.artist) showToast(`Artist: ${result.artist}`);
+
+    performSearch(q);
+  } else {
+    // Fallback if AI thinks it's not a complex request
+    performSearch(result.searchQuery || (input ? input.value : ''));
+  }
 }
 
 async function performSearch(query) {
