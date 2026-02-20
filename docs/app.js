@@ -7327,6 +7327,7 @@ function closeSettings() {
 function setupEvents() {
   // Navigation
   $$('.nav-item').forEach(btn => {
+    if (btn.id === 'raagam-chat-fab') return; // AI button has its own handler
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
 
