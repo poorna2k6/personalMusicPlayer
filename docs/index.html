@@ -948,6 +948,36 @@
             style="background:linear-gradient(135deg,#7c3aed,#06b6d4);color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;">View
             All Features</button>
         </div>
+        <!-- Signed-In Account Info -->
+        <div class="setting-item" id="firebase-account-section"
+          style="flex-direction:column;align-items:stretch;gap:10px;display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="display:flex;align-items:center;gap:6px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+              </svg>
+              <span id="firebase-user-label" style="font-size:13px;color:#b3b3b3;">Not signed in</span>
+            </span>
+            <button id="settings-signout-btn"
+              style="background:rgba(255,60,60,0.15);color:#ff5252;border:1px solid rgba(255,60,60,0.3);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">Sign
+              Out</button>
+          </div>
+          <div style="font-size:11px;color:#b3b3b3;">Synced to cloud every 12 hours.</div>
+        </div>
+
+        <!-- Reset Profile Data -->
+        <div class="setting-item">
+          <div>
+            <div>Reset Profile Data</div>
+            <div style="font-size:11px;color:#b3b3b3;margin-top:2px;">Erase history, liked songs &amp; playlists from
+              cloud</div>
+          </div>
+          <button id="settings-reset-profile-btn"
+            style="background:rgba(255,60,60,0.15);color:#ff5252;border:1px solid rgba(255,60,60,0.3);border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;">Erase
+            Data</button>
+        </div>
+
         <div class="setting-item">
           <span class="about-text">Raagam v3.2 — Built with JioSaavn API</span>
         </div>

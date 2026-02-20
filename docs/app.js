@@ -7990,6 +7990,20 @@ function init() {
       // Settings: Features button
       const featuresBtn = $('#settings-features-btn');
       if (featuresBtn) featuresBtn.addEventListener('click', () => showFeatureTour());
+
+      // Settings: Sign Out button (Firebase)
+      const signOutBtn = $('#settings-signout-btn');
+      if (signOutBtn) signOutBtn.addEventListener('click', () => {
+        if (window.signOutFirebase) window.signOutFirebase();
+      });
+
+      // Settings: Reset (Erase Data) button (Firebase)
+      const resetProfileBtn = $('#settings-reset-profile-btn');
+      if (resetProfileBtn) resetProfileBtn.addEventListener('click', () => {
+        if (confirm('This will permanently erase your history, liked songs, and playlists from the cloud. Continue?')) {
+          if (window.resetCloudProfile) window.resetCloudProfile();
+        }
+      });
     }
     loadHome();
   } catch (criticalError) {
@@ -9538,7 +9552,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const splash = $('#splash');
       const pdlg = $('#profile-dialog');
       const ldlg = $('#language-dialog');
+      const adlg = $('#auth-dialog'); // Firebase auth dialog — do NOT dismiss it
       if (!appEl || !appEl.classList.contains('hidden')) return; // already visible
+
+      // If the auth dialog is visible, the app is in the sign-in flow — let it be.
+      if (adlg && !adlg.classList.contains('hidden')) return;
 
       const dialogsHidden = (!pdlg || pdlg.classList.contains('hidden')) &&
         (!ldlg || ldlg.classList.contains('hidden'));
@@ -9602,3 +9620,253 @@ window.addEventListener('pageshow', (event) => {
     init?.();
   }
 });
+
+// ===== Firebase Auth & Cloud Sync Module =====
+// This is an additive layer that wraps the existing app logic.
+// It does NOT break any existing features — it simply adds an auth gate
+// and syncs user data to Firestore in the background.
+(function initFirebaseSync() {
+  // --- Constants ---
+  const SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
+  const LAST_SYNC_KEY = 'raagam_last_cloud_sync';
+
+  // --- Auth Dialog Elements ---
+  const authDialog = document.getElementById('auth-dialog');
+  const authGoogleBtn = document.getElementById('auth-google-btn');
+  const authErrorMsg = document.getElementById('auth-error-msg');
+
+  // --- Show / Hide Auth Dialog ---
+  function showAuthDialog() {
+    if (authDialog) authDialog.classList.remove('hidden');
+  }
+  function hideAuthDialog() {
+    if (authDialog) authDialog.classList.add('hidden');
+  }
+
+  // --- Google Sign-in Button ---
+  if (authGoogleBtn) {
+    authGoogleBtn.addEventListener('click', async () => {
+      if (!window.raagamFirebase) {
+        if (authErrorMsg) authErrorMsg.textContent = 'Firebase not ready. Please refresh.';
+        return;
+      }
+      authGoogleBtn.disabled = true;
+      authGoogleBtn.textContent = 'Signing in...';
+      if (authErrorMsg) authErrorMsg.textContent = '';
+      try {
+        await window.raagamFirebase.signIn();
+        // onAuthStateChanged listener below takes it from here
+      } catch (err) {
+        console.error('[Auth] Google sign-in failed:', err);
+        if (authErrorMsg) authErrorMsg.textContent = 'Sign-in failed. Please try again.';
+        authGoogleBtn.disabled = false;
+        authGoogleBtn.textContent = 'Continue with Google';
+      }
+    });
+  }
+
+  // --- Auth State Observer ---
+  // Waits for Firebase to be ready, then listens for auth state changes.
+  function waitForFirebaseAndListen() {
+    if (window.raagamFirebase) {
+      startAuthListener();
+      return;
+    }
+    // Firebase module loads asynchronously — poll until ready
+    let attempts = 0;
+    const poll = setInterval(() => {
+      attempts++;
+      if (window.raagamFirebase) {
+        clearInterval(poll);
+        startAuthListener();
+      } else if (attempts > 40) {
+        // Firebase failed to load after 10 seconds — allow app to run anyway
+        clearInterval(poll);
+        console.warn('[Firebase] Could not initialize — running without cloud sync');
+        hideAuthDialog();
+      }
+    }, 250);
+  }
+
+  function startAuthListener() {
+    // Listen for auth state changes dispatched by firebase-config.js
+    window.addEventListener('raagam:auth-changed', async (e) => {
+      const user = e.detail?.user;
+      if (user) {
+        // === User is signed in ===
+        console.log('[Auth] Signed in as:', user.email || user.phoneNumber);
+        hideAuthDialog();
+
+        // Store uid in state for use across the app
+        state.firebaseUid = user.uid;
+        state.firebaseUser = { uid: user.uid, email: user.email, displayName: user.displayName, photoURL: user.photoURL };
+
+        // Update profile name if available from Google account
+        if (user.displayName && (!state.userProfile || !state.userProfile.name || state.userProfile.name === 'Music Lover')) {
+          if (!state.userProfile) state.userProfile = {};
+          state.userProfile.name = user.displayName;
+          localStorage.setItem('raagam_profile', JSON.stringify(state.userProfile));
+        }
+
+        // Update the Settings account section
+        const accountSection = document.getElementById('firebase-account-section');
+        const userLabel = document.getElementById('firebase-user-label');
+        if (accountSection) accountSection.style.display = '';
+        if (userLabel) userLabel.textContent = user.displayName || user.email || 'Signed In';
+
+        // Load cloud data (if any) then decide whether to sync local -> cloud
+        await loadCloudData(user.uid);
+
+        // Schedule background sync every 12 hours
+        scheduleBatchSync(user.uid);
+
+      } else {
+        // === User is signed out ===
+        console.log('[Auth] User signed out — showing auth dialog');
+        state.firebaseUid = null;
+        state.firebaseUser = null;
+
+        // Hide the Settings account section
+        const accountSection = document.getElementById('firebase-account-section');
+        if (accountSection) accountSection.style.display = 'none';
+
+        showAuthDialog();
+      }
+    });
+  }
+
+  // --- Load data from Firestore into state ---
+  async function loadCloudData(uid) {
+    try {
+      const cloudData = await window.raagamFirebase.getProfile(uid);
+      if (!cloudData) {
+        // First-time user — push local data to cloud immediately
+        console.log('[Sync] No cloud data found — uploading local data');
+        await syncToCloud(uid);
+        return;
+      }
+
+      // Merge cloud data carefully (cloud wins on newer timestamps, else keep local)
+      const cloudTs = cloudData.lastSyncedAt || 0;
+      const localTs = parseInt(localStorage.getItem(LAST_SYNC_KEY) || '0');
+
+      if (cloudTs > localTs) {
+        console.log('[Sync] Cloud data is newer — loading from cloud');
+        if (Array.isArray(cloudData.liked) && cloudData.liked.length > 0) {
+          state.liked = cloudData.liked;
+          localStorage.setItem('raagam_liked', JSON.stringify(state.liked));
+        }
+        if (Array.isArray(cloudData.history) && cloudData.history.length > 0) {
+          state.history = cloudData.history.slice(0, 500); // cap at 500
+          localStorage.setItem('raagam_history', JSON.stringify(state.history));
+        }
+        if (Array.isArray(cloudData.playlists) && cloudData.playlists.length > 0) {
+          state.playlists = cloudData.playlists;
+          localStorage.setItem('raagam_playlists', JSON.stringify(state.playlists));
+        }
+        if (cloudData.preferredLanguage) {
+          CONFIG.preferredLanguage = cloudData.preferredLanguage;
+          localStorage.setItem('raagam_language', cloudData.preferredLanguage);
+        }
+        showToast('✅ Profile synced from cloud');
+      } else {
+        // Local is newer or same — sync local to cloud as source of truth
+        await syncToCloud(uid);
+      }
+    } catch (err) {
+      console.warn('[Sync] Could not load cloud data:', err);
+    }
+  }
+
+  // --- Push local data up to Firestore ---
+  async function syncToCloud(uid) {
+    if (!window.raagamFirebase || !uid) return;
+    try {
+      const payload = {
+        liked: state.liked || [],
+        history: (state.history || []).slice(0, 500), // keep last 500
+        playlists: state.playlists || [],
+        preferredLanguage: CONFIG.preferredLanguage || 'hindi',
+        userProfile: state.userProfile || {},
+        lastSyncedAt: Date.now()
+      };
+      await window.raagamFirebase.saveProfile(uid, payload);
+      localStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
+      console.log('[Sync] Data synced to cloud at', new Date().toLocaleTimeString());
+    } catch (err) {
+      console.warn('[Sync] Upload failed:', err);
+    }
+  }
+
+  // --- Schedule automatic 12-hour batch sync ---
+  function scheduleBatchSync(uid) {
+    // Do an immediate sync on login
+    syncToCloud(uid);
+
+    // Schedule every 12 hours
+    setInterval(() => {
+      console.log('[Sync] Running scheduled 12-hour cloud sync');
+      syncToCloud(uid);
+    }, SYNC_INTERVAL_MS);
+
+    // Also sync when page is about to close
+    window.addEventListener('beforeunload', () => syncToCloud(uid));
+  }
+
+  // --- Expose reset function to Settings ---
+  // Called by the "Reset Profile Data" button added to Settings
+  window.resetCloudProfile = async function () {
+    const uid = state.firebaseUid;
+    if (!uid || !window.raagamFirebase) {
+      showToast('❌ Not signed in — cannot reset cloud profile');
+      return;
+    }
+    try {
+      // Clear local state
+      state.liked = [];
+      state.history = [];
+      state.recent = [];
+      state.playlists = [];
+      localStorage.removeItem('raagam_liked');
+      localStorage.removeItem('raagam_history');
+      localStorage.removeItem('raagam_playlists');
+      localStorage.removeItem(LAST_SYNC_KEY);
+
+      // Clear cloud data
+      await window.raagamFirebase.saveProfile(uid, {
+        liked: [],
+        history: [],
+        playlists: [],
+        lastSyncedAt: Date.now(),
+        profileReset: true
+      });
+
+      // Refresh UI
+      renderLibrary?.();
+      renderRecentRow?.();
+      showToast('🗑️ Profile data reset successfully');
+    } catch (err) {
+      console.error('[Reset] Failed to reset profile:', err);
+      showToast('❌ Reset failed — please try again');
+    }
+  };
+
+  // --- Sign-out helper ---
+  window.signOutFirebase = async function () {
+    if (!window.raagamFirebase) return;
+    try {
+      await window.raagamFirebase.signOut();
+      showToast('Signed out');
+    } catch (err) {
+      console.error('[Auth] Sign-out failed:', err);
+    }
+  };
+
+  // --- Kick everything off after DOM is ready ---
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', waitForFirebaseAndListen);
+  } else {
+    waitForFirebaseAndListen();
+  }
+
+})(); // end initFirebaseSync IIFE
