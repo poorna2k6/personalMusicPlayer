@@ -9875,7 +9875,8 @@ window.addEventListener('pageshow', (event) => {
   function wireButtons() {
     const homeBtn = document.getElementById('ai-picks-refresh-btn');
     const libBtn = document.getElementById('ai-picks-library-refresh');
-    [homeBtn, libBtn].forEach(btn => {
+    const generateBtn = document.getElementById('ai-picks-generate-btn');
+    [homeBtn, libBtn, generateBtn].forEach(btn => {
       if (btn) btn.addEventListener('click', (e) => {
         e.stopPropagation();
         generateRecs(true); // force fresh
@@ -9889,6 +9890,9 @@ window.addEventListener('pageshow', (event) => {
       const cached = loadCache();
       if (cached && cached.resolvedTracks && cached.resolvedTracks.length > 0) {
         openAIPicksDetail(cached);
+      } else {
+        // No data yet — trigger generation
+        generateRecs(true);
       }
     });
   }
@@ -9969,11 +9973,15 @@ window.addEventListener('pageshow', (event) => {
     // ── Home section ──────────────────────────────────────────────────
     const homeSection = document.getElementById('section-ai-picks');
     const homeRow = document.getElementById('ai-picks-row');
+    const emptyEl = document.getElementById('ai-picks-empty');
     const titleEl = document.getElementById('ai-picks-section-title');
     const taglineEl = document.getElementById('ai-picks-tagline');
 
     if (homeSection && homeRow) {
       homeSection.style.display = '';
+      // Hide empty state, show scroll row
+      if (emptyEl) emptyEl.style.display = 'none';
+      homeRow.style.display = '';
       if (titleEl) titleEl.textContent = `✨ ${playlistName}`;
       if (taglineEl) taglineEl.textContent = tagline;
       homeRow.innerHTML = '';
@@ -10069,3 +10077,229 @@ window.addEventListener('pageshow', (event) => {
 
   waitAndStart();
 })(); // end initAIRecommendations IIFE
+
+// ===== RAAGAM AI MUSIC ASSISTANT CHAT =====
+(function initRaagamChat() {
+  const fab = document.getElementById('raagam-chat-fab');
+  const panel = document.getElementById('raagam-chat-panel');
+  const closeBtn = document.getElementById('raagam-chat-close');
+  const messages = document.getElementById('raagam-chat-messages');
+  const input = document.getElementById('raagam-chat-input');
+  const sendBtn = document.getElementById('raagam-chat-send');
+  const chips = document.querySelectorAll('.chat-chip');
+  const statusTxt = document.getElementById('chat-status-text');
+
+  if (!fab || !panel) return; // safety guard
+
+  let isOpen = false;
+  let isBusy = false;
+
+  // ── Open / Close ─────────────────────────────────────────────────────
+  function openChat() {
+    isOpen = true;
+    panel.style.transform = 'translateY(0)';
+    fab.style.opacity = '0.4';
+    fab.style.pointerEvents = 'none';
+    if (messages.childElementCount === 0) showWelcome();
+    setTimeout(() => input.focus(), 350);
+  }
+
+  function closeChat() {
+    isOpen = false;
+    panel.style.transform = 'translateY(100%)';
+    fab.style.opacity = '1';
+    fab.style.pointerEvents = '';
+  }
+
+  fab.addEventListener('click', () => isOpen ? closeChat() : openChat());
+  closeBtn.addEventListener('click', closeChat);
+
+  // Close on backdrop tap (outside panel)
+  document.addEventListener('click', (e) => {
+    if (isOpen && !panel.contains(e.target) && e.target !== fab) closeChat();
+  });
+
+  // ── Welcome message ───────────────────────────────────────────────────
+  function showWelcome() {
+    const nowPlaying = state.currentTrack;
+    let welcome;
+    if (nowPlaying) {
+      welcome = `Hey! 👋 I see you're listening to **${nowPlaying.title}** by ${nowPlaying.artist}. Ask me anything about it, or I can find you similar songs! 🎵`;
+    } else {
+      welcome = `Hey! 👋 I'm Raagam AI — tell me how you're feeling or what you wanna hear, and I'll make it happen. 🎵`;
+    }
+    appendBubble(welcome, 'ai');
+  }
+
+  // ── Chip buttons ──────────────────────────────────────────────────────
+  chips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      const msg = chip.getAttribute('data-msg');
+      if (msg) sendMessage(msg);
+    });
+  });
+
+  // ── Input / Send ──────────────────────────────────────────────────────
+  sendBtn.addEventListener('click', () => {
+    const msg = input.value.trim();
+    if (msg) { sendMessage(msg); input.value = ''; }
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const msg = input.value.trim();
+      if (msg) { sendMessage(msg); input.value = ''; }
+    }
+  });
+
+  // ── Main send flow ────────────────────────────────────────────────────
+  function sendMessage(text) {
+    if (isBusy) return;
+    appendBubble(text, 'user');
+    callAI(text);
+  }
+
+  function callAI(text) {
+    if (!CONFIG.aiApiKey) {
+      appendBubble("Hmm, I need a Gemini API key to think properly 🤔 Add it in Settings → AI Features!", 'ai');
+      return;
+    }
+    if (!window.aiWorker && typeof initAIWorker === 'function') initAIWorker();
+    if (!window.aiWorker) {
+      appendBubble("My brain isn't loaded yet — try again in a moment! 🧠", 'ai');
+      return;
+    }
+
+    isBusy = true;
+    if (statusTxt) statusTxt.textContent = 'Thinking... ✨';
+    const typingEl = showTyping();
+
+    const context = {
+      nowPlaying: state.currentTrack || null,
+      history: (state.history || []).slice(0, 10),
+      liked: (state.liked || []).slice(0, 8),
+      language: CONFIG.preferredLanguage || 'hindi'
+    };
+
+    window.aiWorker.postMessage({
+      type: 'MUSIC_CHAT',
+      payload: { message: text, context },
+      apiKey: CONFIG.aiApiKey
+    });
+
+    const onMsg = async (e) => {
+      if (e.data.type !== 'CHAT_RESPONSE' && e.data.type !== 'ERROR') return;
+      window.aiWorker.removeEventListener('message', onMsg);
+      typingEl.remove();
+      isBusy = false;
+      if (statusTxt) statusTxt.textContent = 'Your music assistant ✨';
+
+      if (e.data.type === 'ERROR') {
+        appendBubble("Oops, my brain had a glitch 😅 Try again!", 'ai');
+        return;
+      }
+
+      const res = e.data.payload;
+      await handleAIResponse(res);
+    };
+    window.aiWorker.addEventListener('message', onMsg);
+  }
+
+  // ── Handle AI response + dispatch actions ────────────────────────────
+  async function handleAIResponse(res) {
+    const { action, response, query, mood, artistName } = res;
+
+    switch (action) {
+      case 'play':
+      case 'search': {
+        appendBubble(response, 'ai', {
+          label: '▶ Play Now',
+          onClick: async () => {
+            showToast('🔍 Finding track...');
+            try {
+              const results = await apiSearch(query, 1);
+              if (results && results.length > 0) {
+                playSong(results[0]);
+                closeChat();
+              } else {
+                showToast('Could not find that track 😔');
+              }
+            } catch { showToast('Search failed — please try again'); }
+          }
+        });
+        break;
+      }
+
+      case 'mood': {
+        appendBubble(response, 'ai', {
+          label: '🎵 Generate Playlist',
+          onClick: () => {
+            if (!window.aiWorker && typeof initAIWorker === 'function') initAIWorker();
+            if (window.aiWorker) {
+              window.aiWorker.postMessage({
+                type: 'GENERATE_PLAYLIST',
+                payload: { vibe: mood, language: CONFIG.preferredLanguage || 'hindi' },
+                apiKey: CONFIG.aiApiKey
+              });
+              showToast(`Building ${mood} playlist...`);
+              closeChat();
+            }
+          }
+        });
+        break;
+      }
+
+      case 'artist_info': {
+        // Fetch tracks by artist and tell the user
+        try {
+          const results = await apiSearch(artistName, 5);
+          const trackList = results.slice(0, 3).map(t => `• ${t.title}`).join('\n');
+          appendBubble(`${response}\n\nHere are some popular tracks:\n${trackList}`, 'ai', {
+            label: `▶ Play ${artistName}`,
+            onClick: () => {
+              if (results.length > 0) {
+                state.queue = results; state.queueIndex = 0;
+                playSong(results[0], false);
+                closeChat();
+              }
+            }
+          });
+        } catch {
+          appendBubble(response, 'ai');
+        }
+        break;
+      }
+
+      default:
+        appendBubble(response, 'ai');
+    }
+  }
+
+  // ── DOM helpers ───────────────────────────────────────────────────────
+  function appendBubble(text, who, action = null) {
+    const bubble = document.createElement('div');
+    bubble.className = `chat-bubble ${who}`;
+    // Support **bold** markdown
+    bubble.innerHTML = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+    if (action) {
+      const btn = document.createElement('button');
+      btn.className = 'chat-action-btn';
+      btn.textContent = action.label;
+      btn.addEventListener('click', action.onClick);
+      bubble.appendChild(btn);
+    }
+    messages.appendChild(bubble);
+    messages.scrollTop = messages.scrollHeight;
+    return bubble;
+  }
+
+  function showTyping() {
+    const el = document.createElement('div');
+    el.className = 'chat-bubble ai chat-typing';
+    el.innerHTML = '<span></span><span></span><span></span>';
+    messages.appendChild(el);
+    messages.scrollTop = messages.scrollHeight;
+    return el;
+  }
+
+})(); // end initRaagamChat IIFE

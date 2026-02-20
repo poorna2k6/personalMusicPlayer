@@ -1,5 +1,5 @@
 // ai-worker.js
-// Handles interactions with Google Gemini API for Smart DJ & Personalized Recommendations
+// Handles interactions with Google Gemini API for Smart DJ, Personalized Recommendations & Music Chat
 
 self.postMessage({ type: 'LOG', payload: '[AI Worker] Started' });
 
@@ -39,6 +39,14 @@ self.onmessage = async (e) => {
         } catch (error) {
             self.postMessage({ type: 'ERROR', payload: error.message });
         }
+    } else if (type === 'MUSIC_CHAT') {
+        try {
+            const { message, context } = payload;
+            const result = await musicChat(message, context, apiKey);
+            self.postMessage({ type: 'CHAT_RESPONSE', payload: result });
+        } catch (error) {
+            self.postMessage({ type: 'ERROR', payload: error.message });
+        }
     }
 };
 
@@ -71,8 +79,6 @@ async function generateDailyMixes(language, apiKey) {
     - "color": A hex color code (gradient start).
     Example: [{"title":"X", "description":"Y", "vibe":"Z", "color":"#ff0000"}]
   `;
-
-    // Reuse the request logic
     return await callGemini(prompt, apiKey);
 }
 
@@ -80,7 +86,6 @@ async function generateDailyMixes(language, apiKey) {
 async function callGemini(prompt, apiKey) {
     self.postMessage({ type: 'LOG', payload: '[AI Worker] Calling Gemini API...' });
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
@@ -100,7 +105,6 @@ async function callGemini(prompt, apiKey) {
         }
 
         const data = await response.json();
-        console.log('[AI Worker] Gemini Response:', data);
 
         if (!data.candidates || !data.candidates[0].content) {
             throw new Error('Gemini returned no candidates');
@@ -155,5 +159,54 @@ Return ONLY a raw JSON object (no markdown, no code blocks, no explanation):
     { "song": "Song Title", "artist": "Artist Name", "query": "search query to find this song" }
   ]
 }`;
+    return await callGemini(prompt, apiKey);
+}
+
+// ===== MUSIC ASSISTANT CHAT =====
+async function musicChat(message, context, apiKey) {
+    const nowPlaying = context.nowPlaying
+        ? `"${context.nowPlaying.title}" by ${context.nowPlaying.artist}`
+        : 'nothing';
+    const recentTracks = (context.history || []).slice(0, 8)
+        .map(t => `${t.title || t.song} by ${t.artist}`).join(', ') || 'none';
+    const likedTracks = (context.liked || []).slice(0, 6)
+        .map(t => `${t.title || t.song} by ${t.artist}`).join(', ') || 'none';
+
+    const prompt = `
+You are Raagam AI, a witty and helpful music assistant inside the Raagam music player app.
+
+USER CONTEXT:
+- Currently playing: ${nowPlaying}
+- Recently played: ${recentTracks}
+- Liked songs: ${likedTracks}
+- Preferred language: ${context.language || 'hindi'}
+
+USER MESSAGE: "${message}"
+
+Understand the intent and respond helpfully. Be friendly, witty, and concise (1-3 sentences max).
+
+Return ONLY a raw JSON object (no markdown, no code blocks):
+{
+  "action": "none" | "play" | "search" | "mood" | "artist_info",
+  "response": "Your friendly reply (1-3 sentences, can include emoji)",
+  "query": "search or play query string — required if action is play or search, else null",
+  "mood": "mood keyword for playlist — required if action is mood, else null",
+  "artistName": "artist name — required if action is artist_info, else null"
+}
+
+Action guide:
+- "play"  → user wants a specific song/artist played (set query)
+- "search" → user wants to find something (set query)
+- "mood"  → user expresses a feeling or wants a vibe playlist (set mood)
+- "artist_info" → user asks about an artist (set artistName)
+- "none"  → answer, explain, or help with app feature
+
+Examples:
+- "Play Tum Hi Ho" → {"action":"play","query":"Tum Hi Ho Arijit Singh","response":"Coming right up! 🎶"}
+- "I'm feeling sad" → {"action":"mood","mood":"sad romantic hindi","response":"Aww, sending you virtual chai and some sad bangers 🌧️"}
+- "Play something like this" → {"action":"mood","mood":"based on ${nowPlaying}","response":"Great taste! Finding similar vibes... ✨"}
+- "Tell me about Arijit Singh" → {"action":"artist_info","artistName":"Arijit Singh","response":"Arijit Singh - the king of heartbreak! Here's what I know... 💔"}
+- "How do I add to playlist?" → {"action":"none","response":"Long-press any song card or tap the three dots → Add to Playlist! 🎵"}
+`;
     return await callGemini(prompt, apiKey);
 }
