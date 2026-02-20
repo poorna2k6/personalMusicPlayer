@@ -63,11 +63,14 @@
   <!-- Theme Backdrop (for custom image theme) -->
   <div id="theme-backdrop"></div>
 
-  <!-- Auth Dialog (Mandatory Login) -->
-  <div id="auth-dialog" class="dialog-overlay hidden" style="z-index: 9999; background: #121212;">
-    <div class="dialog-box" style="text-align: center;">
-      <div style="margin-bottom: 24px;">
-        <svg viewBox="0 0 120 120" width="80" height="80" style="margin: 0 auto; display: block;">
+  <!-- Unified Welcome & Auth Screen -->
+  <div id="auth-dialog" class="dialog-overlay hidden"
+    style="z-index: 9999; background: rgba(0,0,0,0.97); overflow-y: auto;">
+    <div class="dialog-box" style="max-width: 380px; padding: 32px 28px;">
+
+      <!-- Logo -->
+      <div style="text-align:center; margin-bottom: 20px;">
+        <svg viewBox="0 0 120 120" width="72" height="72" style="margin: 0 auto; display: block;">
           <defs>
             <linearGradient id="auth-grad" x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" stop-color="#7c3aed" />
@@ -76,18 +79,64 @@
           </defs>
           <rect x="4" y="4" width="112" height="112" rx="26" fill="url(#auth-grad)" />
           <g transform="translate(60,60)" fill="white">
-            <rect x="-16" y="-18" width="6" height="36" rx="3" opacity=".85" />
-            <rect x="-4" y="-24" width="6" height="48" rx="3" />
-            <rect x="8" y="-16" width="6" height="32" rx="3" opacity=".85" />
+            <rect x="-20" y="-10" width="7" height="20" rx="3.5" opacity=".8">
+              <animate attributeName="height" values="20;40;20" dur="1s" repeatCount="indefinite" />
+              <animate attributeName="y" values="-10;-20;-10" dur="1s" repeatCount="indefinite" />
+            </rect>
+            <rect x="-9" y="-18" width="7" height="36" rx="3.5" opacity=".9">
+              <animate attributeName="height" values="36;16;36" dur="1.2s" repeatCount="indefinite" />
+              <animate attributeName="y" values="-18;-8;-18" dur="1.2s" repeatCount="indefinite" />
+            </rect>
+            <rect x="2" y="-24" width="7" height="48" rx="3.5">
+              <animate attributeName="height" values="48;24;48" dur="0.8s" repeatCount="indefinite" />
+              <animate attributeName="y" values="-24;-12;-24" dur="0.8s" repeatCount="indefinite" />
+            </rect>
+            <rect x="13" y="-16" width="7" height="32" rx="3.5" opacity=".9">
+              <animate attributeName="height" values="32;44;32" dur="1.1s" repeatCount="indefinite" />
+              <animate attributeName="y" values="-16;-22;-16" dur="1.1s" repeatCount="indefinite" />
+            </rect>
           </g>
         </svg>
+        <h2 style="font-size:22px; font-weight:700; margin:10px 0 4px;">Welcome to Raagam</h2>
+        <p style="color:#b3b3b3; font-size:13px; margin:0;">Set up your profile to get started</p>
       </div>
-      <h2 style="font-size: 24px; margin-bottom: 8px;">Log In to Raagam</h2>
-      <p style="color: #b3b3b3; margin-bottom: 32px; font-size: 14px;">Sign in to save your history, liked songs, and
-        get AI recommendations across all devices.</p>
 
+      <!-- Name -->
+      <input type="text" id="user-name" placeholder="Your name"
+        style="width:100%;padding:12px 14px;border-radius:10px;border:1px solid #333;background:#1e1e1e;color:#fff;margin-bottom:10px;font-size:15px;box-sizing:border-box;" />
+
+      <!-- Phone (optional) -->
+      <input type="tel" id="user-phone" placeholder="Phone number (optional)"
+        style="width:100%;padding:12px 14px;border-radius:10px;border:1px solid #333;background:#1e1e1e;color:#fff;margin-bottom:10px;font-size:15px;box-sizing:border-box;" />
+
+      <!-- Language -->
+      <label style="display:block;color:#b3b3b3;font-size:12px;margin-bottom:5px;font-weight:500;">PREFERRED
+        LANGUAGE</label>
+      <select id="user-language"
+        style="width:100%;padding:12px 14px;border-radius:10px;border:1px solid #333;background:#1e1e1e;color:#fff;margin-bottom:20px;font-size:15px;appearance:auto;box-sizing:border-box;">
+        <option value="telugu">Telugu</option>
+        <option value="hindi">Hindi</option>
+        <option value="tamil">Tamil</option>
+        <option value="english">English</option>
+        <option value="kannada">Kannada</option>
+        <option value="malayalam">Malayalam</option>
+        <option value="punjabi">Punjabi</option>
+        <option value="bengali">Bengali</option>
+        <option value="marathi">Marathi</option>
+        <option value="gujarati">Gujarati</option>
+        <option value="bhojpuri">Bhojpuri</option>
+      </select>
+
+      <!-- Divider -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
+        <div style="flex:1;height:1px;background:#333;"></div>
+        <span style="color:#555;font-size:12px;">Continue with</span>
+        <div style="flex:1;height:1px;background:#333;"></div>
+      </div>
+
+      <!-- Google Sign-In -->
       <button id="auth-google-btn"
-        style="width: 100%; padding: 14px; border-radius: 24px; background: white; color: black; font-weight: 600; border: none; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 16px;">
+        style="width:100%;padding:13px;border-radius:24px;background:#fff;color:#000;font-weight:700;border:none;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:12px;">
         <svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
           <g transform="matrix(1, 0, 0, 1, 27.009001, -39.238998)">
             <path fill="#4285F4"
@@ -103,7 +152,11 @@
         Continue with Google
       </button>
 
-      <div id="auth-error-msg" style="color: #ff5252; font-size: 13px; margin-top: 16px; min-height: 20px;"></div>
+      <!-- Error message -->
+      <div id="auth-error-msg" style="color:#ff5252;font-size:12px;text-align:center;min-height:18px;"></div>
+
+      <p style="color:#555;font-size:11px;text-align:center;margin-top:14px;">Your history and liked songs sync securely
+        to your Google Account</p>
     </div>
   </div>
 
@@ -1019,39 +1072,9 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <!-- Profile Dialog -->
-  <div id="profile-dialog" class="dialog-overlay hidden">
-    <div class="dialog-box">
-      <h2>Welcome to Raagam</h2>
-      <p style="color:#b3b3b3;margin-bottom:1rem;">Set up your profile</p>
-      <form id="profile-form">
-        <input type="text" id="user-name" placeholder="Your name"
-          style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:12px;font-size:16px;" />
-        <input type="tel" id="user-phone" placeholder="Phone (optional)"
-          style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:12px;font-size:16px;" />
-        <label style="display:block;color:#b3b3b3;font-size:13px;margin-bottom:6px;">Preferred Language</label>
-        <select id="user-language"
-          style="width:100%;padding:12px;border-radius:8px;border:1px solid #333;background:#282828;color:#fff;margin-bottom:16px;font-size:16px;appearance:auto;">
-          <option value="telugu">Telugu</option>
-          <option value="hindi">Hindi</option>
-          <option value="tamil">Tamil</option>
-          <option value="english">English</option>
-          <option value="kannada">Kannada</option>
-          <option value="malayalam">Malayalam</option>
-          <option value="punjabi">Punjabi</option>
-          <option value="bengali">Bengali</option>
-          <option value="marathi">Marathi</option>
-          <option value="gujarati">Gujarati</option>
-          <option value="bhojpuri">Bhojpuri</option>
-        </select>
-        <button type="submit"
-          style="width:100%;padding:12px;border-radius:24px;background:#1DB954;color:#000;font-weight:bold;border:none;font-size:16px;cursor:pointer;">Continue</button>
-      </form>
-      <button id="skip-profile"
-        style="width:100%;padding:12px;margin-top:8px;background:transparent;border:1px solid #555;border-radius:24px;color:#fff;font-size:14px;cursor:pointer;">Skip
-        for now</button>
-    </div>
-  </div>
+  <!-- Profile Dialog (now points to unified auth-dialog) -->
+  <!-- This empty element is kept so app.js showProfileDialog() references still work -->
+  <div id="profile-dialog" class="dialog-overlay hidden" style="display:none;"></div>
 
   <!-- Language Dialog -->
   <div id="language-dialog" class="dialog-overlay hidden">
