@@ -1599,6 +1599,7 @@ function renderSkeletons(container, count = 5) {
 function initAIWorker() {
   if (!aiWorker) {
     aiWorker = new Worker('ai-worker.js?v=' + Date.now());
+    window.aiWorker = aiWorker; // expose globally so IIFEs can access
     aiWorker.onerror = (e) => {
       console.error('[Main] AI Worker Error:', e.message, 'in', e.filename, 'line', e.lineno);
     };
@@ -1606,7 +1607,6 @@ function initAIWorker() {
       const { type, payload } = e.data;
       if (type === 'LOG') {
         console.log(payload);
-        document.title = "Worker LOG: " + payload; // Debug
         return;
       }
       if (type === 'PLAYLIST_GENERATED') {
@@ -6770,6 +6770,22 @@ function showFeatureTour() {
         </div>
 
         <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">🤖</div>
+          <div class="ft-card-info">
+            <h4>Raagam AI Assistant <span class="ft-badge-new">NEW</span></h4>
+            <p>Tap the floating ✨ button (bottom-right) to chat with Gemini AI. Ask it to play songs, build mood playlists, tell you about artists, or answer any music question. Context-aware — it knows what you're currently listening to.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
+          <div class="ft-card-icon">🎯</div>
+          <div class="ft-card-info">
+            <h4>AI Personalized Picks <span class="ft-badge-new">NEW</span></h4>
+            <p>Gemini analyzes your listening history and liked songs to generate a fun-named playlist of 10 fresh discoveries just for you. Updates every 24 hours — or tap <strong>Get New</strong> for a fresh batch. Find it on Home and in Library.</p>
+          </div>
+        </div>
+
+        <div class="ft-card ft-card-new">
           <div class="ft-card-icon">🔊</div>
           <div class="ft-card-info">
             <h4>Volume Normalization <span class="ft-badge-new">NEW</span></h4>
@@ -9750,6 +9766,14 @@ window.addEventListener('pageshow', (event) => {
 
         // Schedule background sync every 12 hours
         scheduleBatchSync(user.uid);
+
+        // Boot the app if it hasn't started yet (first sign-in)
+        const appEl = document.getElementById('app');
+        if (appEl && appEl.classList.contains('hidden')) {
+          appEl.classList.remove('hidden');
+          // Run init() to load home screen, library etc.
+          try { if (typeof init === 'function') init(); } catch (_) { }
+        }
 
       } else {
         // === User is signed out ===
