@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { usePlayerStore } from './hooks/usePlayerStore';
+import { useAuth } from './context/AuthContext';
 import Sidebar from './components/Sidebar';
 import Library from './components/Library';
 import AlbumView from './components/AlbumView';
@@ -8,10 +9,13 @@ import PlaylistView from './components/PlaylistView';
 import HomeView from './components/HomeView';
 import Player from './components/Player';
 import TrackRow from './components/TrackRow';
+import AuthScreen from './components/AuthScreen';
 import { fetchTracks, fetchArtists, fetchAlbums, fetchPlaylists, scanLibrary } from './api';
 
 export default function App() {
   const player = usePlayerStore();
+  const { user, authState, logout } = useAuth();
+
   const [view, setView] = useState('home');
   const [tracks, setTracks] = useState([]);
   const [artists, setArtists] = useState([]);
@@ -24,6 +28,7 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   const loadData = async () => {
     setLoadError(null);
@@ -38,7 +43,6 @@ export default function App() {
       setArtists(ar);
       setAlbums(al);
       setPlaylists(pl);
-      // Keep player aware of the full library for DJ recommendations
       player.updateAllTracks(t);
     } catch (err) {
       console.error('Failed to load data:', err);
@@ -49,9 +53,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadData();
+    if (authState === 'authenticated' || authState === 'skipped') {
+      loadData();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authState]);
 
   const handleScan = async () => {
     setScanning(true);
@@ -82,6 +88,23 @@ export default function App() {
     else if (newView === 'album') setSelectedAlbum(payload);
     else if (newView === 'playlist') setSelectedPlaylist(payload);
   };
+
+  // Show loading spinner while checking stored auth
+  if (authState === 'loading') {
+    return (
+      <div className="flex items-center justify-center h-screen bg-surface-950">
+        <svg className="w-8 h-8 text-indigo-400 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+        </svg>
+      </div>
+    );
+  }
+
+  // Show auth/login screen when not logged in and not skipped
+  if (authState === 'unauthenticated') {
+    return <AuthScreen />;
+  }
 
   const renderContent = () => {
     if (loading) {
@@ -171,6 +194,50 @@ export default function App() {
           >
             {scanning ? 'Scanning…' : 'Scan Library'}
           </button>
+
+          {/* User avatar / guest badge */}
+          {authState === 'authenticated' && user ? (
+            <div className="relative">
+              <button
+                onClick={() => setShowUserMenu((v) => !v)}
+                className="flex items-center gap-2 rounded-full focus:outline-none"
+                title={user.name}
+              >
+                {user.picture ? (
+                  <img
+                    src={user.picture}
+                    alt={user.name}
+                    className="w-8 h-8 rounded-full border-2 border-indigo-500"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-bold border-2 border-indigo-500">
+                    {user.name?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                )}
+              </button>
+              {showUserMenu && (
+                <div
+                  className="absolute right-0 top-10 w-52 bg-surface-800 border border-surface-700 rounded-xl shadow-xl z-50 overflow-hidden"
+                  onMouseLeave={() => setShowUserMenu(false)}
+                >
+                  <div className="px-4 py-3 border-b border-surface-700">
+                    <p className="text-sm font-medium text-white truncate">{user.name}</p>
+                    <p className="text-xs text-surface-400 truncate">{user.email}</p>
+                  </div>
+                  <button
+                    onClick={() => { setShowUserMenu(false); logout(); }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-surface-300 hover:text-white hover:bg-surface-700 transition-colors"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className="text-xs text-surface-500 bg-surface-800 px-2.5 py-1 rounded-full border border-surface-700">
+              Guest
+            </span>
+          )}
         </div>
       </header>
 

@@ -118,3 +118,51 @@ export function getAudioUrl(filePath) {
 export function getCoverUrl(trackId) {
   return `${API_BASE}/tracks/${trackId}/cover`;
 }
+
+// --- Auth ---
+
+export async function verifyGoogleToken(credential) {
+  const res = await fetch(`${API_BASE}/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credential }),
+  });
+  if (!res.ok) throw new Error('Authentication failed');
+  return res.json();
+}
+
+// --- User history & recommendations (require auth token) ---
+
+export async function getUserHistory(token, limit = 50) {
+  if (DEMO_MODE) return [];
+  const res = await fetch(`${API_BASE}/user/history?limit=${limit}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch history');
+  return res.json();
+}
+
+export async function recordPlayHistory(token, trackId) {
+  if (DEMO_MODE) return { ok: true };
+  try {
+    await fetch(`${API_BASE}/user/history`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ trackId }),
+    });
+  } catch {
+    // Non-critical — silently ignore recording failures
+  }
+}
+
+export async function getUserRecommendations(token, limit = 20) {
+  if (DEMO_MODE) return [];
+  const res = await fetch(`${API_BASE}/user/recommendations?limit=${limit}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch recommendations');
+  return res.json();
+}

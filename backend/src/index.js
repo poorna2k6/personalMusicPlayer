@@ -5,6 +5,8 @@ const cors = require('cors');
 const path = require('path');
 const tracksRouter = require('./routes/tracks');
 const playlistsRouter = require('./routes/playlists');
+const authRouter = require('./routes/auth');
+const userRouter = require('./routes/user');
 const { initDb, getDb } = require('./db');
 const { scanLibrary } = require('./scanner');
 
@@ -80,6 +82,8 @@ app.use('/api/audio', express.static(MUSIC_LIBRARY_PATH));
 // API routes
 app.use('/api/tracks', tracksRouter);
 app.use('/api/playlists', playlistsRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/user', userRouter);
 
 // Apply rate limiting to analytics write endpoint
 app.post('/api/analytics', rateLimit(60 * 1000, 30), (req, res) => {
