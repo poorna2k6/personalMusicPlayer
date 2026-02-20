@@ -1685,12 +1685,67 @@ async function loadHome() {
   if (languageTitle) languageTitle.textContent = `Latest ${langName} Hits`;
   if (bollywoodTitle) bollywoodTitle.textContent = lang === 'hindi' ? 'Bollywood Party Mix' : 'Bollywood Vibes';
 
+  // Each section has an ordered list of fallback queries.
+  // If the primary query returns 0 results, the next is tried automatically.
   const sections = [
-    { id: 'trending-row', query: `trending ${langName} songs ${currentYear}` },
-    { id: 'language-row', query: `new ${langName} songs ${currentYear} latest` },
-    { id: 'bollywood-row', query: lang === 'hindi' ? `bollywood party songs ${currentYear}` : `bollywood top hits ${currentYear}` },
-    { id: 'chill-row', query: 'chill lofi relax' },
+    {
+      id: 'trending-row',
+      sectionId: 'section-trending',
+      queries: [
+        `trending ${langName} songs ${currentYear}`,
+        `top ${langName} hits ${currentYear}`,
+        `popular ${langName} songs`,
+        `best hindi songs ${currentYear}`,             // universal fallback
+      ]
+    },
+    {
+      id: 'language-row',
+      sectionId: 'section-language',
+      queries: [
+        `new ${langName} songs ${currentYear} latest`,
+        `${langName} new releases ${currentYear}`,
+        `new hindi songs ${currentYear}`,              // universal fallback
+        `latest bollywood songs`,
+      ]
+    },
+    {
+      id: 'bollywood-row',
+      sectionId: 'section-bollywood',
+      queries: [
+        lang === 'hindi' ? `bollywood party songs ${currentYear}` : `bollywood top hits ${currentYear}`,
+        `bollywood hits ${currentYear}`,
+        `bollywood songs 2024`,
+        `top bollywood songs`,
+      ]
+    },
+    {
+      id: 'chill-row',
+      sectionId: 'section-chill',
+      queries: [
+        'chill lofi relax',
+        'lo-fi beats study',
+        'peaceful instrumental music',
+        'soft romantic hindi songs',
+      ]
+    },
   ];
+
+  // Helper: hide a section wrapper if empty, show if it has content
+  function setSectionVisible(sectionId, visible) {
+    const sec = $(`#${sectionId}`);
+    if (sec) sec.style.display = visible ? '' : 'none';
+  }
+
+  // Helper: try each query in order until one returns tracks
+  async function fetchWithFallbacks(queryList, limit = 15) {
+    for (const q of queryList) {
+      try {
+        const tracks = await apiSearch(q, limit);
+        if (tracks && tracks.length >= 3) return tracks; // need at least 3 to bother showing
+      } catch { /* try next */ }
+    }
+    return []; // all failed
+  }
 
   // Try today's cache — renders instantly with zero API calls
   const today = new Date().toDateString();
@@ -1702,11 +1757,13 @@ async function loadHome() {
       const container = $(`#${s.id}`);
       if (!container) return;
       const cached = cachedSections[i];
-      if (cached?.length) {
+      if (cached?.length >= 3) {
         container.innerHTML = '';
         cached.forEach(t => container.appendChild(renderSongCard(t)));
+        setSectionVisible(s.sectionId, true);
       } else {
-        container.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px">Could not load. Check your connection.</p>';
+        // Cached empty — hide the section
+        setSectionVisible(s.sectionId, false);
       }
     });
     state.homeLoaded = true;
@@ -1715,21 +1772,23 @@ async function loadHome() {
     return;
   }
 
-  // First load today: show skeletons → fetch all sections in parallel → cache results
+  // First load today: show skeletons → fetch all sections (with fallbacks) in parallel → cache
   sections.forEach(s => renderSkeletons($(`#${s.id}`)));
 
-  const results = await Promise.all(sections.map(s => apiSearch(s.query, 15)));
+  const results = await Promise.all(sections.map(s => fetchWithFallbacks(s.queries, 15)));
   const toCache = [];
   results.forEach((tracks, i) => {
     const container = $(`#${sections[i].id}`);
-    if (!container) return;
+    if (!container) { toCache.push([]); return; }
     container.innerHTML = '';
-    if (tracks.length === 0) {
-      container.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:20px">Could not load. Check your connection.</p>';
-      toCache.push([]);
-    } else {
+    if (tracks.length >= 3) {
       tracks.forEach(t => container.appendChild(renderSongCard(t)));
+      setSectionVisible(sections[i].sectionId, true);
       toCache.push(tracks);
+    } else {
+      // All fallbacks exhausted — hide the section cleanly
+      setSectionVisible(sections[i].sectionId, false);
+      toCache.push([]);
     }
   });
 
@@ -1740,9 +1799,18 @@ async function loadHome() {
 
 // Runs silently in the background to keep the home cache fresh for next session
 async function _refreshHomeSections(sections, cacheKey) {
+  async function fetchWithFallbacks(queryList, limit = 15) {
+    for (const q of queryList) {
+      try {
+        const tracks = await apiSearch(q, limit);
+        if (tracks && tracks.length >= 3) return tracks;
+      } catch { }
+    }
+    return [];
+  }
   try {
-    const results = await Promise.all(sections.map(s => apiSearch(s.query, 15)));
-    const toCache = results.map(tracks => (tracks.length ? tracks : []));
+    const results = await Promise.all(sections.map(s => fetchWithFallbacks(s.queries || [s.query], 15)));
+    const toCache = results.map(tracks => (tracks.length >= 3 ? tracks : []));
     localStorage.setItem(cacheKey, JSON.stringify(toCache));
   } catch { }
 }
