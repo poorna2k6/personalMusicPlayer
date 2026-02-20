@@ -6713,12 +6713,25 @@ function showFeatureTour() {
             🎵 Start Listening
           </button>
           <p class="ft-footer-note">You can revisit this guide anytime from <strong>Settings → App Features</strong></p>
+          <div id="app-version-display" style="margin-top: 15px; font-size: 11px; color: var(--text-dim); text-align: center; font-family: monospace;">Version: Loading...</div>
         </div>
 
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
+
+  // Fetch and display version
+  fetch('version.json?t=' + Date.now())
+    .then(res => res.json())
+    .then(data => {
+      const versionEl = document.getElementById('app-version-display');
+      if (versionEl) versionEl.textContent = `Version: ${data.version}`;
+    })
+    .catch(() => {
+      const versionEl = document.getElementById('app-version-display');
+      if (versionEl) versionEl.textContent = 'Version: Local/Dev';
+    });
 
   // Mark as seen
   localStorage.setItem('raagam_feature_tour_seen', 'true');

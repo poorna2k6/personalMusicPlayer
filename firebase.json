@@ -1,6 +1,9 @@
 {
     "hosting": {
         "public": "docs",
+        "predeploy": [
+            "node scripts/update_version.js"
+        ],
         "ignore": [
             "firebase.json",
             "**/.*",
