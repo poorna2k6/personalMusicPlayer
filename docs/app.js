@@ -10190,8 +10190,6 @@ window.addEventListener('pageshow', (event) => {
   function openChat() {
     isOpen = true;
     panel.style.transform = 'translateY(0)';
-    fab.style.opacity = '0.4';
-    fab.style.pointerEvents = 'none';
     if (messages.childElementCount === 0) showWelcome();
     setTimeout(() => input.focus(), 350);
   }
@@ -10199,8 +10197,6 @@ window.addEventListener('pageshow', (event) => {
   function closeChat() {
     isOpen = false;
     panel.style.transform = 'translateY(100%)';
-    fab.style.opacity = '1';
-    fab.style.pointerEvents = '';
   }
 
   fab.addEventListener('click', () => isOpen ? closeChat() : openChat());
