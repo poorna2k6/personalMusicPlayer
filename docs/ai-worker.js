@@ -131,9 +131,16 @@ async function generatePlaylist(vibe, language, apiKey) {
 
 // ===== PERSONALIZED AI RECOMMENDATIONS =====
 async function generatePersonalizedRecs(history, likedSongs, language, apiKey) {
-    const allTracks = [...(likedSongs || []).slice(0, 15), ...(history || []).slice(0, 20)];
+    const historyTracks = (history || []).map(h => h.track || h).filter(Boolean);
+    const allTracks = [...(likedSongs || []).slice(0, 15), ...historyTracks.slice(0, 20)];
     const songSummary = allTracks.slice(0, 20)
-        .map(t => `${t.title || t.song || 'unknown'} by ${t.artist || 'unknown'}`)
+        .map(t => {
+            const name = t.title || t.song || t.name || 'unknown';
+            const artist = (typeof t.primaryArtists === 'string') ? t.primaryArtists :
+                (t.artists && t.artists.primary) ? t.artists.primary.map(a => a.name).join(', ') :
+                    t.artist || 'unknown';
+            return `${name} by ${artist}`;
+        })
         .join('; ') || 'popular melodious songs';
 
     const prompt = `
@@ -164,49 +171,28 @@ Return ONLY a raw JSON object (no markdown, no code blocks, no explanation):
 
 // ===== MUSIC ASSISTANT CHAT =====
 async function musicChat(message, context, apiKey) {
-    const nowPlaying = context.nowPlaying
-        ? `"${context.nowPlaying.title}" by ${context.nowPlaying.artist}`
-        : 'nothing';
-    const recentTracks = (context.history || []).slice(0, 8)
-        .map(t => `${t.title || t.song} by ${t.artist}`).join(', ') || 'none';
-    const likedTracks = (context.liked || []).slice(0, 6)
-        .map(t => `${t.title || t.song} by ${t.artist}`).join(', ') || 'none';
-
     const prompt = `
-You are Raagam AI, a witty and helpful music assistant inside the Raagam music player app.
+You are Raagam AI, a witty and helpful music assistant.
+User message: "${message}"
+Current language preference: ${context.language || 'hindi'}
+${context.nowPlaying ? `Currently listening to: ${context.nowPlaying.title || context.nowPlaying.name} by ${context.nowPlaying.artist}` : ''}
 
-USER CONTEXT:
-- Currently playing: ${nowPlaying}
-- Recently played: ${recentTracks}
-- Liked songs: ${likedTracks}
-- Preferred language: ${context.language || 'hindi'}
-
-USER MESSAGE: "${message}"
-
-Understand the intent and respond helpfully. Be friendly, witty, and concise (1-3 sentences max).
-
-Return ONLY a raw JSON object (no markdown, no code blocks):
+Your goal is to understand what the user wants and respond exactly in this JSON format:
 {
-  "action": "none" | "play" | "search" | "mood" | "artist_info",
-  "response": "Your friendly reply (1-3 sentences, can include emoji)",
-  "query": "search or play query string — required if action is play or search, else null",
-  "mood": "mood keyword for playlist — required if action is mood, else null",
-  "artistName": "artist name — required if action is artist_info, else null"
+  "action": "play" | "search" | "mood" | "general",
+  "response": "A friendly, witty, and concise reply to the user (1-2 sentences).",
+  "query": "If action is play/search, the search query to use",
+  "mood": "If action is mood, the vibe/mood to generate a playlist for (e.g. sad, gym, romantic)",
+  "artistName": "Optional artist name mentioned"
 }
 
-Action guide:
-- "play"  → user wants a specific song/artist played (set query)
-- "search" → user wants to find something (set query)
-- "mood"  → user expresses a feeling or wants a vibe playlist (set mood)
-- "artist_info" → user asks about an artist (set artistName)
-- "none"  → answer, explain, or help with app feature
-
 Examples:
-- "Play Tum Hi Ho" → {"action":"play","query":"Tum Hi Ho Arijit Singh","response":"Coming right up! 🎶"}
-- "I'm feeling sad" → {"action":"mood","mood":"sad romantic hindi","response":"Aww, sending you virtual chai and some sad bangers 🌧️"}
-- "Play something like this" → {"action":"mood","mood":"based on ${nowPlaying}","response":"Great taste! Finding similar vibes... ✨"}
-- "Tell me about Arijit Singh" → {"action":"artist_info","artistName":"Arijit Singh","response":"Arijit Singh - the king of heartbreak! Here's what I know... 💔"}
-- "How do I add to playlist?" → {"action":"none","response":"Long-press any song card or tap the three dots → Add to Playlist! 🎵"}
+- User: "play some arijit singh" -> {"action": "play", "response": "Playing the king of heartbreak, Arijit Singh! 💔", "query": "Arijit Singh"}
+- User: "I feel sad" -> {"action": "mood", "response": "I've got just the playlist for a good cry.", "mood": "sad heartbreak"}
+- User: "who are you" -> {"action": "general", "response": "I am Raagam AI, your personal DJ and music buddy! 🎧"}
+
+Return ONLY the raw JSON object (no markdown, no code blocks, no explanation).
 `;
+
     return await callGemini(prompt, apiKey);
 }
