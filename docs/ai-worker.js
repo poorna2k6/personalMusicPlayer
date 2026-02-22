@@ -53,17 +53,20 @@ self.onmessage = async (e) => {
 async function intelligentSearch(query, apiKey) {
     const prompt = `
     Analyze the user search query: "${query}"
-    Return a raw JSON object with these fields (if applicable):
-    - "isNaturalLanguage": boolean (true if it looks like a sentence/request like "play sad songs", false if just a keyword like "Believer")
-    - "artist": string (extracted artist name)
-    - "song": string (extracted song name)
-    - "year": string (extracted year or decade)
-    - "language": string (implied language)
-    - "mood": string (implied mood)
-    - "searchQuery": string (optimized keyword search query for a music API)
-    
-    Example: "Play sad songs from Arijit" -> {"isNaturalLanguage": true, "artist": "Arijit Singh", "mood": "Sad", "searchQuery": "Arijit Singh sad songs"}
-    Example: "Believer" -> {"isNaturalLanguage": false, "searchQuery": "Believer"}
+    If the query is a simple keyword search (like "Believer" or "Arijit Singh"), return:
+    {"isNaturalLanguage": false, "searchQuery": "keyword search"}
+
+    If the query expresses a mood, situation, or vibe (like "play sad songs", "gym songs", "romantic mood"), act as an expert DJ.
+    Create a highly curated 10-song playlist matching the requested vibe.
+    Return ONLY a raw JSON object with these fields (no markdown/code blocks):
+    {
+      "isNaturalLanguage": true,
+      "playlistName": "A catchy, clever name for this playlist",
+      "tagline": "A fun, witty 1-sentence tagline about the vibe",
+      "songs": [
+        {"song": "Song title", "artist": "Artist name", "query": "Song title Artist name"}
+      ]
+    }
     `;
     return await callGemini(prompt, apiKey);
 }
@@ -85,7 +88,7 @@ async function generateDailyMixes(language, apiKey) {
 // Refactored Gemini call
 async function callGemini(prompt, apiKey) {
     self.postMessage({ type: 'LOG', payload: '[AI Worker] Calling Gemini API...' });
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout

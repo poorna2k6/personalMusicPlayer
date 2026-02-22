@@ -1596,17 +1596,30 @@ function renderSkeletons(container, count = 5) {
 }
 
 // ===== AI Worker Setup =====
+// Registry for one-time response callbacks from AI worker
+const _aiCallbacks = {};
+
 function initAIWorker() {
   if (!aiWorker) {
     aiWorker = new Worker('ai-worker.js?v=' + Date.now());
     window.aiWorker = aiWorker; // expose globally so IIFEs can access
     aiWorker.onerror = (e) => {
       console.error('[Main] AI Worker Error:', e.message, 'in', e.filename, 'line', e.lineno);
+      // Fire any pending error callbacks
+      Object.values(_aiCallbacks).forEach(cb => cb && cb({ type: 'ERROR', payload: e.message }));
     };
+    // Centralized message dispatcher — handles ALL message types
     aiWorker.onmessage = (e) => {
       const { type, payload } = e.data;
       if (type === 'LOG') {
         console.log(payload);
+        return;
+      }
+      // Check for registered one-time callbacks first
+      if (_aiCallbacks[type]) {
+        const cb = _aiCallbacks[type];
+        delete _aiCallbacks[type];
+        cb(payload);
         return;
       }
       if (type === 'PLAYLIST_GENERATED') {
@@ -1616,7 +1629,7 @@ function initAIWorker() {
       } else if (type === 'SEARCH_ANALYZED') {
         handleSmartSearchResults(payload);
       } else if (type === 'ERROR') {
-        console.error('AI Error:', payload);
+        console.error('[AI Worker] Error:', payload);
         state.smartDJBusy = false;
         updateSmartDJUI();
       }
@@ -1841,23 +1854,37 @@ function setupSearch() {
     searchDebounce = setTimeout(() => performSearch(q), 400);
   });
 
+  const triggerSearch = (q, forceAI = false) => {
+    if (!q) return;
+
+    // Smart Search Trigger: explicit force, OR natural language indicators, OR long queries
+    const isMood = ['sad', 'happy', 'gym', 'romantic', 'chill', 'party', 'focus'].some(m => q.toLowerCase().includes(m));
+    const isSentence = q.split(' ').length > 3 || q.length > 20;
+
+    if (CONFIG.aiApiKey && (forceAI || isMood || isSentence)) {
+      clearTimeout(searchDebounce);
+      showToast('Asking AI...');
+      state.smartDJBusy = true;
+      resultsContainer.innerHTML = `<div style="padding:40px;text-align:center;"><p style="color:#888;margin-bottom:20px;">Analyzing your request...</p>${renderLoader()}</div>`;
+      if (!aiWorker) initAIWorker();
+      aiWorker.postMessage({ type: 'INTELLIGENT_SEARCH', payload: { query: q }, apiKey: CONFIG.aiApiKey });
+    } else {
+      performSearch(q); // Force immediate search
+    }
+  };
+
   input.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
-      const q = input.value.trim();
-      if (!q) return;
-      // Smart Search Trigger: Long query (> 3 words or > 15 chars) + AI Key present
-      if (CONFIG.aiApiKey && (q.length > 20 || q.split(' ').length > 3)) {
-        clearTimeout(searchDebounce);
-        showToast('Asking AI...');
-        state.smartDJBusy = true;
-        resultsContainer.innerHTML = `<div style="padding:40px;text-align:center;"><p style="color:#888;margin-bottom:20px;">Analyzing your request...</p>${renderLoader()}</div>`;
-        if (!aiWorker) initAIWorker();
-        aiWorker.postMessage({ type: 'INTELLIGENT_SEARCH', payload: { query: q }, apiKey: CONFIG.aiApiKey });
-      } else {
-        performSearch(q); // Force immediate search
-      }
+      triggerSearch(input.value.trim());
     }
   });
+
+  const askAiBtn = document.getElementById('ask-ai-search-btn');
+  if (askAiBtn) {
+    askAiBtn.addEventListener('click', () => {
+      triggerSearch(input.value.trim() || 'play some random hits', true);
+    });
+  }
 
   clearBtn.addEventListener('click', () => {
     input.value = '';
@@ -1941,17 +1968,98 @@ function renderSearchTabs(container, query) {
 function handleSmartSearchResults(result) {
   state.smartDJBusy = false;
   const input = $('#search-input');
+  const resultsContainer = $('#search-results');
 
-  if (result.isNaturalLanguage) {
-    const q = result.searchQuery;
-    showToast(`AI: Searching for "${q}"`);
-    if (input) input.value = q; // Update input logic
+  if (result.isNaturalLanguage && result.songs && result.songs.length > 0) {
+    if (input) input.value = result.playlistName || 'AI Recommendations';
 
-    // Optional: Show mood/artist toast
-    if (result.mood) showToast(`Mood: ${result.mood}`);
-    if (result.artist) showToast(`Artist: ${result.artist}`);
+    // Clear the analyzing loader
+    resultsContainer.innerHTML = '';
 
-    performSearch(q);
+    // Render the beautiful AI Playlist header
+    const header = document.createElement('div');
+    header.style.cssText = `
+      background: linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(6, 182, 212, 0.1));
+      border: 1px solid rgba(124, 58, 237, 0.3);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    `;
+
+    // Add a glowing effect
+    const glow = document.createElement('div');
+    glow.style.cssText = `
+      position: absolute;
+      top: -50px; left: -50px; right: -50px; bottom: -50px;
+      background: radial-gradient(circle at 50% 0%, rgba(124, 58, 237, 0.15), transparent 70%);
+      pointer-events: none;
+    `;
+    header.appendChild(glow);
+
+    header.innerHTML += `
+      <div style="font-size:32px; margin-bottom:12px;">✨</div>
+      <h2 style="font-size:24px; font-weight:800; margin:0 0 8px 0; background:linear-gradient(135deg, #fff, #b3b3b3); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">
+        ${result.playlistName}
+      </h2>
+      <p style="color:#b3b3b3; font-size:14px; margin:0 0 20px 0;">${result.tagline || 'Curated just for you by AI'}</p>
+      <button id="ai-playlist-play-all" style="
+        background: linear-gradient(135deg, #7c3aed, #06b6d4);
+        color: #fff; border: none; border-radius: 24px;
+        padding: 12px 32px; font-size: 15px; font-weight: 700;
+        cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+        box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3);
+      ">Play All</button>
+    `;
+
+    resultsContainer.appendChild(header);
+
+    // Create a container for the songs
+    const listHtml = document.createElement('div');
+    listHtml.className = 'search-results-list';
+    resultsContainer.appendChild(listHtml);
+
+    // Play All logic
+    const playAllBtn = header.querySelector('#ai-playlist-play-all');
+    let fetchedTracks = [];
+
+    playAllBtn.addEventListener('click', () => {
+      if (fetchedTracks.length > 0) {
+        state.queue = [...fetchedTracks];
+        state.queueIndex = 0;
+        playTrack(state.queue[0]);
+        updateQueueUI();
+        showToast(`Playing ${result.playlistName}`);
+      }
+    });
+
+    // Fetch each song using apiSearch
+    Promise.all(result.songs.map(async (s) => {
+      try {
+        const trks = await apiSearch(s.query, 1);
+        if (trks && trks.length > 0) {
+          const track = trks[0];
+          fetchedTracks.push(track);
+
+          // Use standard createTrackItem for consistency
+          const item = createTrackItem(track, () => {
+            const idx = fetchedTracks.findIndex(t => t.id === track.id);
+            if (idx > -1) {
+              state.queue = [...fetchedTracks];
+              state.queueIndex = idx;
+              playTrack(track);
+              updateQueueUI();
+            }
+          });
+          listHtml.appendChild(item);
+        }
+      } catch (err) {
+        console.error('Failed to fetch AI song:', s.query);
+      }
+    }));
+
   } else {
     // Fallback if AI thinks it's not a complex request
     performSearch(result.searchQuery || (input ? input.value : ''));
@@ -10117,31 +10225,22 @@ window.addEventListener('pageshow', (event) => {
     // Show loading state
     setLoadingState(true);
 
+    // Register one-time callback for the RECS_GENERATED response
+    _aiCallbacks['RECS_GENERATED'] = async (result) => {
+      if (!result || !Array.isArray(result.songs)) { setLoadingState(false); return; }
+      const resolvedTracks = await resolveSongs(result.songs);
+      const fullData = { ...result, resolvedTracks, generatedAt: Date.now() };
+      saveCache(fullData);
+      setLoadingState(false);
+      renderAIPicks(fullData);
+    };
+    _aiCallbacks['ERROR'] = () => setLoadingState(false);
+
     window.aiWorker.postMessage({
       type: 'PERSONALIZED_RECS',
       payload: { history, likedSongs: liked, language },
       apiKey: CONFIG.aiApiKey
     });
-
-    // Listen for response — attach once per request
-    const onMsg = async (e) => {
-      if (e.data.type === 'RECS_GENERATED') {
-        window.aiWorker.removeEventListener('message', onMsg);
-        const result = e.data.payload;
-        if (!result || !Array.isArray(result.songs)) { setLoadingState(false); return; }
-        // Resolve songs to playable tracks
-        const resolvedTracks = await resolveSongs(result.songs);
-        const fullData = { ...result, resolvedTracks, generatedAt: Date.now() };
-        saveCache(fullData);
-        setLoadingState(false);
-        renderAIPicks(fullData);
-      } else if (e.data.type === 'ERROR') {
-        window.aiWorker.removeEventListener('message', onMsg);
-        setLoadingState(false);
-        console.warn('[AI Recs] Worker error:', e.data.payload);
-      }
-    };
-    window.aiWorker.addEventListener('message', onMsg);
   }
 
   // ── Resolve song text → playable tracks via existing search ──────────
@@ -10390,22 +10489,19 @@ window.addEventListener('pageshow', (event) => {
       apiKey: CONFIG.aiApiKey
     });
 
-    const onMsg = async (e) => {
-      if (e.data.type !== 'CHAT_RESPONSE' && e.data.type !== 'ERROR') return;
-      window.aiWorker.removeEventListener('message', onMsg);
+    // Use centralized callback registry instead of addEventListener (no conflict with onmessage)
+    _aiCallbacks['CHAT_RESPONSE'] = async (res) => {
       typingEl.remove();
       isBusy = false;
       if (statusTxt) statusTxt.textContent = 'Your music assistant ✨';
-
-      if (e.data.type === 'ERROR') {
-        appendBubble("Oops, my brain had a glitch 😅 Try again!", 'ai');
-        return;
-      }
-
-      const res = e.data.payload;
       await handleAIResponse(res);
     };
-    window.aiWorker.addEventListener('message', onMsg);
+    _aiCallbacks['ERROR'] = () => {
+      typingEl.remove();
+      isBusy = false;
+      if (statusTxt) statusTxt.textContent = 'Your music assistant ✨';
+      appendBubble("Oops, my brain had a glitch 😅 Try again!", 'ai');
+    };
   }
 
   // ── Handle AI response + dispatch actions ────────────────────────────
