@@ -47,7 +47,7 @@ const CONFIG = {
     'english': { name: 'English', keywords: ['english', 'western', 'pop', 'rock', 'jazz'] },
     'all': { name: 'All Languages', keywords: [] }
   },
-  aiApiKey: 'AIzaSyBTYjUYHDUCbZZ1QEHmhYwKdw-8u_yYPxI' // User provided Gemini Key
+  aiApiKey: 'AIzaSyA5wrwiTJyKlITd__dSNpsppNk1oCmEcPg' // User provided Gemini Key
 };
 
 // ===== State =====
@@ -9713,6 +9713,92 @@ window.addEventListener('pageshow', (event) => {
     });
   }
 
+  // --- Skip Login Logic ---
+  const authSkipBtn = document.getElementById('auth-skip-btn');
+  const skipWarningDialog = document.getElementById('skip-warning-dialog');
+  const skipConfirmYes = document.getElementById('skip-confirm-yes');
+  const skipConfirmBack = document.getElementById('skip-confirm-back');
+
+  if (authSkipBtn) {
+    authSkipBtn.addEventListener('click', () => {
+      if (skipWarningDialog) skipWarningDialog.classList.remove('hidden');
+    });
+  }
+
+  if (skipConfirmBack) {
+    skipConfirmBack.addEventListener('click', () => {
+      if (skipWarningDialog) skipWarningDialog.classList.add('hidden');
+    });
+  }
+
+  if (skipConfirmYes) {
+    skipConfirmYes.addEventListener('click', () => {
+      // Capture name / phone / language from the unified onboarding form
+      const nameInput = document.getElementById('user-name');
+      const phoneInput = document.getElementById('user-phone');
+      const langInput = document.getElementById('user-language');
+
+      const enteredName = nameInput?.value.trim() || '';
+      const enteredPhone = phoneInput?.value.trim() || '';
+      const enteredLang = langInput?.value || 'hindi';
+
+      const chosenName = enteredName || 'Guest User';
+      CONFIG.userProfile = { name: chosenName, phone: enteredPhone };
+      localStorage.setItem('raagam_profile', JSON.stringify(CONFIG.userProfile));
+      state.userProfile = CONFIG.userProfile;
+
+      CONFIG.preferredLanguage = enteredLang;
+      localStorage.setItem('raagam_language', enteredLang);
+      localStorage.setItem('raagam_language_setup', 'true');
+      state.languageSetupComplete = true;
+
+      // Set guest flag and random UUID
+      localStorage.setItem('raagam_guest', 'true');
+      const guestId = 'guest_' + Math.random().toString(36).substr(2, 9);
+      state.firebaseUid = guestId;
+      state.firebaseUser = { uid: guestId, displayName: chosenName };
+
+      if (skipWarningDialog) skipWarningDialog.classList.add('hidden');
+      hideAuthDialog();
+
+      // Boot the app if it hasn't started yet
+      const appEl = document.getElementById('app');
+      if (appEl && appEl.classList.contains('hidden')) {
+        appEl.classList.remove('hidden');
+        try { if (typeof init === 'function') init(); } catch (_) { }
+      }
+
+      // Update Settings UI
+      const accountSection = document.getElementById('firebase-account-section');
+      const userLabel = document.getElementById('firebase-user-label');
+      const signoutBtn = document.getElementById('settings-signout-btn');
+      const signinBtn = document.getElementById('settings-signin-btn');
+
+      if (accountSection) accountSection.style.display = '';
+      if (userLabel) userLabel.textContent = chosenName;
+      if (signoutBtn) signoutBtn.style.display = 'none';
+      if (signinBtn) signinBtn.style.display = 'block';
+    });
+  }
+
+  // --- Settings UI Sign In (from Guest mode) ---
+  const settingsSigninBtn = document.getElementById('settings-signin-btn');
+  if (settingsSigninBtn) {
+    settingsSigninBtn.addEventListener('click', async () => {
+      if (!window.raagamFirebase) {
+        showToast('Firebase not ready. Please try again.');
+        return;
+      }
+      try {
+        await window.raagamFirebase.signIn();
+        localStorage.removeItem('raagam_guest');
+      } catch (err) {
+        console.error('[Auth] Google sign-in from settings failed:', err);
+        showToast('Sign-in failed. Please try again.');
+      }
+    });
+  }
+
   // --- Auth State Observer ---
   // Waits for Firebase to be ready, then listens for auth state changes.
   function waitForFirebaseAndListen() {
@@ -9737,6 +9823,33 @@ window.addEventListener('pageshow', (event) => {
   }
 
   function startAuthListener() {
+    // Check if user is a guest first
+    if (localStorage.getItem('raagam_guest') === 'true') {
+      const storedProfile = JSON.parse(localStorage.getItem('raagam_profile') || '{}');
+      const chosenName = storedProfile.name || 'Guest User';
+      const guestId = state.firebaseUid || 'guest_' + Math.random().toString(36).substr(2, 9);
+
+      state.firebaseUid = guestId;
+      state.firebaseUser = { uid: guestId, displayName: chosenName };
+
+      hideAuthDialog();
+      startAppIfNotStarted();
+
+      // Update Settings UI
+      setTimeout(() => {
+        const accountSection = document.getElementById('firebase-account-section');
+        const userLabel = document.getElementById('firebase-user-label');
+        const signoutBtn = document.getElementById('settings-signout-btn');
+        const signinBtn = document.getElementById('settings-signin-btn');
+
+        if (accountSection) accountSection.style.display = '';
+        if (userLabel) userLabel.textContent = chosenName;
+        if (signoutBtn) signoutBtn.style.display = 'none';
+        if (signinBtn) signinBtn.style.display = 'block';
+      }, 500);
+      return; // Skip normal firebase auth listener wait if they are a guest
+    }
+
     // Listen for auth state changes dispatched by firebase-config.js
     window.addEventListener('raagam:auth-changed', async (e) => {
       const user = e.detail?.user;
@@ -9769,12 +9882,13 @@ window.addEventListener('pageshow', (event) => {
         scheduleBatchSync(user.uid);
 
         // Boot the app if it hasn't started yet (first sign-in)
-        const appEl = document.getElementById('app');
-        if (appEl && appEl.classList.contains('hidden')) {
-          appEl.classList.remove('hidden');
-          // Run init() to load home screen, library etc.
-          try { if (typeof init === 'function') init(); } catch (_) { }
-        }
+        startAppIfNotStarted();
+
+        // Update Settings UI for Signed In user
+        const signoutBtn = document.getElementById('settings-signout-btn');
+        const signinBtn = document.getElementById('settings-signin-btn');
+        if (signoutBtn) signoutBtn.style.display = 'block';
+        if (signinBtn) signinBtn.style.display = 'none';
 
       } else {
         // === User is signed out ===

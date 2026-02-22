@@ -152,11 +152,35 @@
         Continue with Google
       </button>
 
+      <button id="auth-skip-btn"
+        style="width:100%;padding:13px;border-radius:24px;background:transparent;color:#b3b3b3;font-weight:600;border:1px solid #555;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;margin-bottom:12px;">
+        Skip for now
+      </button>
+
       <!-- Error message -->
       <div id="auth-error-msg" style="color:#ff5252;font-size:12px;text-align:center;min-height:18px;"></div>
 
       <p style="color:#555;font-size:11px;text-align:center;margin-top:14px;">Your history and liked songs sync securely
         to your Google Account</p>
+    </div>
+  </div>
+
+  <!-- Skip Warning Dialog -->
+  <div id="skip-warning-dialog" class="dialog-overlay hidden" style="z-index: 10000; background: rgba(0,0,0,0.9);">
+    <div class="dialog-box" style="max-width: 340px; text-align: center; padding: 24px;">
+      <div style="font-size:36px; margin-bottom: 12px;">⚠️</div>
+      <h2 style="font-size:18px; margin-bottom: 12px;">Are you sure?</h2>
+      <p style="color:#b3b3b3; font-size:14px; margin-bottom: 24px; line-height: 1.5;">
+        If not logged in, no recommendation playlist and profile is not saved.
+      </p>
+      <button id="skip-confirm-yes"
+        style="width:100%;padding:12px;border-radius:24px;background:#1DB954;color:#000;font-weight:700;border:none;font-size:14px;cursor:pointer;margin-bottom:10px;">
+        Yes
+      </button>
+      <button id="skip-confirm-back"
+        style="width:100%;padding:12px;border-radius:24px;background:transparent;color:#fff;font-weight:600;border:1px solid #555;font-size:14px;cursor:pointer;">
+        Go back to Login
+      </button>
     </div>
   </div>
 
@@ -1213,11 +1237,16 @@
               </svg>
               <span id="firebase-user-label" style="font-size:13px;color:#b3b3b3;">Not signed in</span>
             </span>
-            <button id="settings-signout-btn"
-              style="background:rgba(255,60,60,0.15);color:#ff5252;border:1px solid rgba(255,60,60,0.3);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">Sign
-              Out</button>
+            <div>
+              <button id="settings-signout-btn"
+                style="background:rgba(255,60,60,0.15);color:#ff5252;border:1px solid rgba(255,60,60,0.3);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;display:none;">Sign
+                Out</button>
+              <button id="settings-signin-btn"
+                style="background:#1DB954;color:#000;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;display:none;">Sign
+                in to Save Profile</button>
+            </div>
           </div>
-          <div style="font-size:11px;color:#b3b3b3;">Synced to cloud every 12 hours.</div>
+          <div style="font-size:11px;color:#b3b3b3;">Your history, likes, and custom playlists sync securely.</div>
         </div>
 
         <!-- Reset Profile Data -->

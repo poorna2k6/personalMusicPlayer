@@ -784,7 +784,7 @@ app.get('/api/analytics/admin/engagement', (req, res) => {
       GROUP BY e.session_id
     `).all(cutoff);
     const avgTracksPerSession = tracksPerSession.length > 0
-      ? (tracksPerSession.reduce((s,r) => s + r.tracks_played, 0) / tracksPerSession.length).toFixed(1)
+      ? (tracksPerSession.reduce((s, r) => s + r.tracks_played, 0) / tracksPerSession.length).toFixed(1)
       : 0;
 
     res.json({ durationBuckets, featureUsage, musicActions, viewTransitions, avgTracksPerSession });
@@ -879,6 +879,44 @@ app.get('/api/analytics/admin/sessions', (req, res) => {
     res.json({ sessions, total: total.count, limit, offset });
   } catch (err) {
     console.error('Sessions list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// User specific logs
+app.get('/api/analytics/admin/user_logs', (req, res) => {
+  try {
+    const db = getDb();
+    const identifier = req.query.identifier; // can be sessionId or IP address
+
+    if (!identifier) {
+      return res.status(400).json({ error: 'identifier is required' });
+    }
+
+    const sessions = db.prepare(`
+      SELECT s.*
+      FROM analytics_sessions s
+      WHERE s.id = ? OR s.ip_address = ?
+      ORDER BY s.start_time DESC
+      LIMIT 20
+    `).all(identifier, identifier);
+
+    const sessionIds = sessions.map(s => s.id);
+    let events = [];
+    if (sessionIds.length > 0) {
+      const placeholders = sessionIds.map(() => '?').join(',');
+      events = db.prepare(`
+        SELECT *
+        FROM analytics_events
+        WHERE session_id IN (${placeholders})
+        ORDER BY timestamp DESC
+        LIMIT 500
+      `).all(...sessionIds);
+    }
+
+    res.json({ sessions, events });
+  } catch (err) {
+    console.error('User logs error:', err);
     res.status(500).json({ error: err.message });
   }
 });
