@@ -1866,8 +1866,19 @@ function setupSearch() {
       showToast('Asking AI...');
       state.smartDJBusy = true;
       resultsContainer.innerHTML = `<div style="padding:40px;text-align:center;"><p style="color:#888;margin-bottom:20px;">Analyzing your request...</p>${renderLoader()}</div>`;
-      if (!aiWorker) initAIWorker();
-      aiWorker.postMessage({ type: 'INTELLIGENT_SEARCH', payload: { query: q }, apiKey: CONFIG.aiApiKey });
+      if (!window.aiWorker && typeof initAIWorker === 'function') initAIWorker();
+
+      window.aiWorker.postMessage({ type: 'INTELLIGENT_SEARCH', payload: { query: q }, apiKey: CONFIG.aiApiKey });
+
+      _aiCallbacks['SEARCH_ANALYZED'] = (res) => {
+        handleSmartSearchResults(res);
+      };
+      _aiCallbacks['ERROR'] = (err) => {
+        console.error('[AI Search] Error:', err);
+        state.smartDJBusy = false;
+        resultsContainer.innerHTML = `<div class="empty-state">AI Search failed. Please try a regular search.</div>`;
+        performSearch(q);
+      };
     } else {
       performSearch(q); // Force immediate search
     }
@@ -10496,11 +10507,12 @@ window.addEventListener('pageshow', (event) => {
       if (statusTxt) statusTxt.textContent = 'Your music assistant ✨';
       await handleAIResponse(res);
     };
-    _aiCallbacks['ERROR'] = () => {
+    _aiCallbacks['ERROR'] = (err) => {
       typingEl.remove();
       isBusy = false;
       if (statusTxt) statusTxt.textContent = 'Your music assistant ✨';
-      appendBubble("Oops, my brain had a glitch 😅 Try again!", 'ai');
+      console.error('[Music Chat] AI Error:', err);
+      appendBubble("Oops, my brain had a glitch 😅 Try again! " + (typeof err === 'string' ? err : ''), 'ai');
     };
   }
 
