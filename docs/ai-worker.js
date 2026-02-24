@@ -25,8 +25,8 @@ self.onmessage = async (e) => {
         }
     } else if (type === 'INTELLIGENT_SEARCH') {
         try {
-            const { query } = payload;
-            const result = await intelligentSearch(query, apiKey);
+            const { query, language, likedSongs, recentHistory } = payload;
+            const result = await intelligentSearch(query, language, likedSongs, recentHistory, apiKey);
             self.postMessage({ type: 'SEARCH_ANALYZED', payload: result });
         } catch (error) {
             self.postMessage({ type: 'ERROR', payload: error.message });
@@ -50,14 +50,31 @@ self.onmessage = async (e) => {
     }
 };
 
-async function intelligentSearch(query, apiKey) {
+async function intelligentSearch(query, language, likedSongs, recentHistory, apiKey) {
+    const lang = language || 'hindi';
+    const profileContext = [];
+    if (likedSongs && likedSongs.length > 0) {
+        profileContext.push(`User's liked songs: ${likedSongs.join('; ')}`);
+    }
+    if (recentHistory && recentHistory.length > 0) {
+        profileContext.push(`User's recently played: ${recentHistory.join('; ')}`);
+    }
+    const profileStr = profileContext.length > 0
+        ? `\n\nUser profile context (use this to personalize recommendations):\n${profileContext.join('\n')}`
+        : '';
+
     const prompt = `
     Analyze the user search query: "${query}"
+    User's preferred language: ${lang}
+    ${profileStr}
+
     If the query is a simple keyword search (like "Believer" or "Arijit Singh"), return:
     {"isNaturalLanguage": false, "searchQuery": "keyword search"}
 
     If the query expresses a mood, situation, or vibe (like "play sad songs", "gym songs", "romantic mood"), act as an expert DJ.
     Create a highly curated 10-song playlist matching the requested vibe.
+    IMPORTANT: Prefer songs in the user's preferred language (${lang}) unless the query explicitly asks for another language.
+    If user profile context is available, factor in their taste — suggest songs similar to what they already like but with fresh discoveries.
     Return ONLY a raw JSON object with these fields (no markdown/code blocks):
     {
       "isNaturalLanguage": true,
@@ -174,20 +191,30 @@ Return ONLY a raw JSON object (no markdown, no code blocks, no explanation):
 
 // ===== MUSIC ASSISTANT CHAT =====
 async function musicChat(message, context, apiKey) {
+    const likedStr = (context.likedSummary && context.likedSummary.length > 0)
+        ? `\nUser's favorite songs: ${context.likedSummary.join('; ')}`
+        : '';
+    const historyStr = (context.historySummary && context.historySummary.length > 0)
+        ? `\nRecently played: ${context.historySummary.join('; ')}`
+        : '';
+
     const prompt = `
 You are Raagam AI, a witty and helpful music assistant.
 User message: "${message}"
 Current language preference: ${context.language || 'hindi'}
-${context.nowPlaying ? `Currently listening to: ${context.nowPlaying.title || context.nowPlaying.name} by ${context.nowPlaying.artist}` : ''}
+${context.nowPlaying ? `Currently listening to: ${context.nowPlaying.title || context.nowPlaying.name} by ${context.nowPlaying.artist}` : ''}${likedStr}${historyStr}
 
 Your goal is to understand what the user wants and respond exactly in this JSON format:
 {
   "action": "play" | "search" | "mood" | "general",
   "response": "A friendly, witty, and concise reply to the user (1-2 sentences).",
-  "query": "If action is play/search, the search query to use",
+  "query": "If action is play/search, the search query to use. IMPORTANT: prefer songs in ${context.language || 'hindi'} language.",
   "mood": "If action is mood, the vibe/mood to generate a playlist for (e.g. sad, gym, romantic)",
   "artistName": "Optional artist name mentioned"
 }
+
+When recommending or playing songs, use the user's listening history and liked songs to personalize your suggestions.
+Prefer songs in their preferred language (${context.language || 'hindi'}) unless they ask for something else.
 
 Examples:
 - User: "play some arijit singh" -> {"action": "play", "response": "Playing the king of heartbreak, Arijit Singh! 💔", "query": "Arijit Singh"}
