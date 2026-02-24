@@ -1606,7 +1606,13 @@ function initAIWorker() {
     aiWorker.onerror = (e) => {
       console.error('[Main] AI Worker Error:', e.message, 'in', e.filename, 'line', e.lineno);
       // Fire any pending error callbacks
-      Object.values(_aiCallbacks).forEach(cb => cb && cb({ type: 'ERROR', payload: e.message }));
+      Object.keys(_aiCallbacks).forEach(key => {
+        if (key.endsWith('_ERROR')) {
+          const cb = _aiCallbacks[key];
+          delete _aiCallbacks[key];
+          cb(e.message);
+        }
+      });
     };
     // Centralized message dispatcher — handles ALL message types
     aiWorker.onmessage = (e) => {
@@ -1628,13 +1634,62 @@ function initAIWorker() {
         renderDailyMixes(payload);
       } else if (type === 'SEARCH_ANALYZED') {
         handleSmartSearchResults(payload);
+      } else if (type === 'RECS_GENERATED') {
+        console.log('[AI] RECS_GENERATED received (no callback registered)');
+      } else if (type === 'CHAT_RESPONSE') {
+        console.log('[AI] CHAT_RESPONSE received (no callback registered)');
       } else if (type === 'ERROR') {
         console.error('[AI Worker] Error:', payload);
+        // Fire any feature-specific error callbacks
+        Object.keys(_aiCallbacks).forEach(key => {
+          if (key.endsWith('_ERROR')) {
+            const cb = _aiCallbacks[key];
+            delete _aiCallbacks[key];
+            cb(payload);
+          }
+        });
         state.smartDJBusy = false;
         updateSmartDJUI();
       }
     };
   }
+}
+
+// ===== Play AI-generated playlist (from PLAYLIST_GENERATED) =====
+async function playSmartPlaylist(songs) {
+  if (!songs || !Array.isArray(songs) || songs.length === 0) {
+    showToast('AI returned no songs — try a different vibe');
+    state.smartDJBusy = false;
+    updateSmartDJUI();
+    return;
+  }
+
+  showToast('Building your playlist...');
+  const resolved = [];
+
+  for (const item of songs) {
+    try {
+      const results = await apiSearch(item.query || `${item.song} ${item.artist}`, 1);
+      if (results && results.length > 0) {
+        resolved.push(results[0]);
+      }
+    } catch { /* skip unresolvable */ }
+    if (resolved.length >= 10) break;
+  }
+
+  state.smartDJBusy = false;
+  updateSmartDJUI();
+
+  if (resolved.length === 0) {
+    showToast('Could not find matching songs — try again');
+    return;
+  }
+
+  state.queue = [...resolved];
+  state.queueIndex = 0;
+  playSong(resolved[0], false);
+  renderQueue();
+  showToast(`Playing ${resolved.length} tracks`);
 }
 
 // ===== Home Page =====
@@ -1868,12 +1923,33 @@ function setupSearch() {
       resultsContainer.innerHTML = `<div style="padding:40px;text-align:center;"><p style="color:#888;margin-bottom:20px;">Analyzing your request...</p>${renderLoader()}</div>`;
       if (!window.aiWorker && typeof initAIWorker === 'function') initAIWorker();
 
-      window.aiWorker.postMessage({ type: 'INTELLIGENT_SEARCH', payload: { query: q }, apiKey: CONFIG.aiApiKey });
+      window.aiWorker.postMessage({
+        type: 'INTELLIGENT_SEARCH',
+        payload: {
+          query: q,
+          language: CONFIG.preferredLanguage || 'hindi',
+          likedSongs: (state.liked || []).slice(0, 10).map(t => {
+            const name = t.title || t.song || t.name || '';
+            const artist = (typeof t.primaryArtists === 'string') ? t.primaryArtists :
+              (t.artists && t.artists.primary) ? t.artists.primary.map(a => a.name).join(', ') : t.artist || '';
+            return `${name} by ${artist}`;
+          }).filter(s => s !== ' by '),
+          recentHistory: (state.history || []).slice(0, 10).map(h => {
+            const t = h.track || h;
+            const name = t.title || t.song || t.name || '';
+            const artist = (typeof t.primaryArtists === 'string') ? t.primaryArtists :
+              (t.artists && t.artists.primary) ? t.artists.primary.map(a => a.name).join(', ') : t.artist || '';
+            return `${name} by ${artist}`;
+          }).filter(s => s !== ' by ')
+        },
+        apiKey: CONFIG.aiApiKey
+      });
 
       _aiCallbacks['SEARCH_ANALYZED'] = (res) => {
+        delete _aiCallbacks['SEARCH_ERROR'];
         handleSmartSearchResults(res);
       };
-      _aiCallbacks['ERROR'] = (err) => {
+      _aiCallbacks['SEARCH_ERROR'] = (err) => {
         console.error('[AI Search] Error:', err);
         state.smartDJBusy = false;
         resultsContainer.innerHTML = `<div class="empty-state">AI Search failed. Please try a regular search.</div>`;
@@ -2040,8 +2116,8 @@ function handleSmartSearchResults(result) {
       if (fetchedTracks.length > 0) {
         state.queue = [...fetchedTracks];
         state.queueIndex = 0;
-        playTrack(state.queue[0]);
-        updateQueueUI();
+        playSong(state.queue[0], false);
+        renderQueue();
         showToast(`Playing ${result.playlistName}`);
       }
     });
@@ -2054,16 +2130,8 @@ function handleSmartSearchResults(result) {
           const track = trks[0];
           fetchedTracks.push(track);
 
-          // Use standard createTrackItem for consistency
-          const item = createTrackItem(track, () => {
-            const idx = fetchedTracks.findIndex(t => t.id === track.id);
-            if (idx > -1) {
-              state.queue = [...fetchedTracks];
-              state.queueIndex = idx;
-              playTrack(track);
-              updateQueueUI();
-            }
-          });
+          // Use renderResultItem for consistency with rest of search UI
+          const item = renderResultItem(track);
           listHtml.appendChild(item);
         }
       } catch (err) {
@@ -10238,6 +10306,7 @@ window.addEventListener('pageshow', (event) => {
 
     // Register one-time callback for the RECS_GENERATED response
     _aiCallbacks['RECS_GENERATED'] = async (result) => {
+      delete _aiCallbacks['RECS_ERROR'];
       if (!result || !Array.isArray(result.songs)) { setLoadingState(false); return; }
       const resolvedTracks = await resolveSongs(result.songs);
       const fullData = { ...result, resolvedTracks, generatedAt: Date.now() };
@@ -10245,7 +10314,7 @@ window.addEventListener('pageshow', (event) => {
       setLoadingState(false);
       renderAIPicks(fullData);
     };
-    _aiCallbacks['ERROR'] = () => setLoadingState(false);
+    _aiCallbacks['RECS_ERROR'] = () => setLoadingState(false);
 
     window.aiWorker.postMessage({
       type: 'PERSONALIZED_RECS',
@@ -10487,10 +10556,18 @@ window.addEventListener('pageshow', (event) => {
     if (statusTxt) statusTxt.textContent = 'Thinking... ✨';
     const typingEl = showTyping();
 
+    // Build rich context with readable song names for the AI
+    const formatTrack = (t) => {
+      const name = t.title || t.song || t.name || '';
+      const artist = (typeof t.primaryArtists === 'string') ? t.primaryArtists :
+        (t.artists && t.artists.primary) ? t.artists.primary.map(a => a.name).join(', ') : t.artist || '';
+      return `${name} by ${artist}`;
+    };
+
     const context = {
       nowPlaying: state.currentTrack || null,
-      history: (state.history || []).slice(0, 10),
-      liked: (state.liked || []).slice(0, 8),
+      likedSummary: (state.liked || []).slice(0, 8).map(formatTrack).filter(s => s !== ' by '),
+      historySummary: (state.history || []).slice(0, 10).map(h => formatTrack(h.track || h)).filter(s => s !== ' by '),
       language: CONFIG.preferredLanguage || 'hindi'
     };
 
@@ -10502,12 +10579,13 @@ window.addEventListener('pageshow', (event) => {
 
     // Use centralized callback registry instead of addEventListener (no conflict with onmessage)
     _aiCallbacks['CHAT_RESPONSE'] = async (res) => {
+      delete _aiCallbacks['CHAT_ERROR'];
       typingEl.remove();
       isBusy = false;
       if (statusTxt) statusTxt.textContent = 'Your music assistant ✨';
       await handleAIResponse(res);
     };
-    _aiCallbacks['ERROR'] = (err) => {
+    _aiCallbacks['CHAT_ERROR'] = (err) => {
       typingEl.remove();
       isBusy = false;
       if (statusTxt) statusTxt.textContent = 'Your music assistant ✨';
