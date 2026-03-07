@@ -1,9 +1,40 @@
 import { useRef, useEffect, useState } from 'react';
 import { getAudioUrl, getCoverUrl } from '../api';
 
+// Extracts dominant color from an img element using a hidden canvas
+function extractDominantColor(imgSrc, callback) {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 8;
+      canvas.height = 8;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 8, 8);
+      const data = ctx.getImageData(0, 0, 8, 8).data;
+      let r = 0, g = 0, b = 0;
+      const count = data.length / 4;
+      for (let i = 0; i < data.length; i += 4) {
+        r += data[i]; g += data[i + 1]; b += data[i + 2];
+      }
+      // Darken the color significantly so text remains readable
+      const factor = 0.45;
+      callback(`rgb(${Math.round((r / count) * factor)},${Math.round((g / count) * factor)},${Math.round((b / count) * factor)})`);
+    } catch {
+      callback(null);
+    }
+  };
+  img.onerror = () => callback(null);
+  img.src = imgSrc;
+}
+
 export default function Player({ player }) {
   const audioRef = useRef(null);
   const [playbackError, setPlaybackError] = useState(null);
+  const [accentColor, setAccentColor] = useState(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [titleKey, setTitleKey] = useState(0); // triggers fade animation on track change
   const {
     currentTrack, isPlaying, volume, currentTime, duration,
     shuffle, repeat, djMode,
@@ -11,6 +42,13 @@ export default function Player({ player }) {
     togglePlay, nextTrack, prevTrack, setVolume,
     toggleShuffle, toggleRepeat, toggleDjMode,
   } = player;
+
+  // Extract dominant color from album art on track change
+  useEffect(() => {
+    if (!currentTrack) { setAccentColor(null); return; }
+    setTitleKey(k => k + 1); // trigger title fade animation
+    extractDominantColor(getCoverUrl(currentTrack.id), setAccentColor);
+  }, [currentTrack?.id]);
 
   // Sync audio element with player state
   useEffect(() => {
@@ -46,7 +84,7 @@ export default function Player({ player }) {
           break;
         case 'ArrowRight':
           e.preventDefault();
-          nextTrack();
+          nextTrack(audioRef.current?.currentTime || 0, audioRef.current?.duration || 0);
           break;
         case 'ArrowLeft':
           e.preventDefault();
@@ -63,6 +101,9 @@ export default function Player({ player }) {
         case 'm':
         case 'M':
           setVolume(volume > 0 ? 0 : 0.8);
+          break;
+        case '?':
+          setShowShortcuts(prev => !prev);
           break;
         default:
           break;
@@ -86,7 +127,8 @@ export default function Player({ player }) {
       audioRef.current.currentTime = 0;
       audioRef.current.play().catch(() => {});
     } else {
-      nextTrack();
+      // Pass full duration as currentTime to signal natural completion (not a skip)
+      nextTrack(audioRef.current?.duration || 0, audioRef.current?.duration || 0);
     }
   };
 
@@ -118,7 +160,10 @@ export default function Player({ player }) {
   }
 
   return (
-    <footer className="h-24 bg-surface-900 border-t border-surface-800 flex items-center px-4 gap-4 relative shrink-0">
+    <footer
+      className="h-24 border-t border-surface-800 flex items-center px-4 gap-4 relative shrink-0 transition-all duration-700"
+      style={{ background: accentColor ? `linear-gradient(to right, ${accentColor} 0%, #0f172a 55%)` : '#0f172a' }}
+    >
       {playbackError && (
         <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full mb-1 px-3 py-1.5 rounded-lg bg-red-900/90 border border-red-700 text-red-200 text-xs whitespace-nowrap z-10">
           {playbackError}
@@ -140,17 +185,25 @@ export default function Player({ player }) {
 
       {/* Track info */}
       <div className="flex items-center gap-3 w-64 shrink-0">
-        <div className="w-14 h-14 rounded-lg bg-surface-700 overflow-hidden shrink-0">
+        <div className={`w-14 h-14 rounded-lg bg-surface-700 overflow-hidden shrink-0 relative ${isPlaying ? 'animate-pulse-subtle' : ''}`}>
           <img
             src={getCoverUrl(currentTrack.id)}
             alt=""
             className="w-full h-full object-cover"
             onError={(e) => { e.target.style.display = 'none'; }}
           />
+          {/* Animated equalizer bars overlay while playing */}
+          {isPlaying && (
+            <div className="absolute bottom-1 left-1 flex items-end gap-[2px]">
+              <span className="w-[3px] rounded-sm bg-white/80 animate-eq1" style={{ height: '4px' }} />
+              <span className="w-[3px] rounded-sm bg-white/80 animate-eq2" style={{ height: '10px' }} />
+              <span className="w-[3px] rounded-sm bg-white/80 animate-eq3" style={{ height: '7px' }} />
+            </div>
+          )}
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-medium truncate">{currentTrack.title}</p>
-          <p className="text-xs text-surface-400 truncate">{currentTrack.artist}</p>
+          <p key={`title-${titleKey}`} className="text-sm font-medium truncate animate-fadeUp">{currentTrack.title}</p>
+          <p key={`artist-${titleKey}`} className="text-xs text-surface-400 truncate animate-fadeUp" style={{ animationDelay: '30ms' }}>{currentTrack.artist}</p>
           {djMode && (
             <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-600/30 text-indigo-300 border border-indigo-500/30">
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
@@ -195,7 +248,7 @@ export default function Player({ player }) {
             )}
           </button>
 
-          <button onClick={nextTrack} className="p-1 text-surface-300 hover:text-white transition-colors" title="Next">
+          <button onClick={() => nextTrack(audioRef.current?.currentTime || 0, audioRef.current?.duration || 0)} className="p-1 text-surface-300 hover:text-white transition-colors" title="Next">
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
               <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
             </svg>
@@ -228,6 +281,35 @@ export default function Player({ player }) {
           <span className="text-xs text-surface-400 w-10">{formatTime(duration)}</span>
         </div>
       </div>
+
+      {/* Keyboard shortcuts modal */}
+      {showShortcuts && (
+        <div
+          className="absolute bottom-28 right-4 z-50 w-64 rounded-xl bg-surface-800 border border-surface-700 shadow-2xl p-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-semibold text-white">Keyboard Shortcuts</h4>
+            <button onClick={() => setShowShortcuts(false)} className="text-surface-400 hover:text-white text-lg leading-none">&times;</button>
+          </div>
+          <div className="space-y-1.5 text-xs text-surface-300">
+            {[
+              ['Space', 'Play / Pause'],
+              ['→', 'Next track'],
+              ['←', 'Previous track'],
+              ['↑', 'Volume up'],
+              ['↓', 'Volume down'],
+              ['M', 'Toggle mute'],
+              ['?', 'Show shortcuts'],
+            ].map(([key, label]) => (
+              <div key={key} className="flex items-center justify-between">
+                <span>{label}</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-surface-700 border border-surface-600 font-mono text-[10px]">{key}</kbd>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Right side: DJ Mode + Volume */}
       <div className="flex items-center gap-3 w-48 shrink-0 justify-end">
@@ -272,6 +354,13 @@ export default function Player({ player }) {
           onChange={(e) => setVolume(parseFloat(e.target.value))}
           className="w-20"
         />
+        <button
+          onClick={() => setShowShortcuts(prev => !prev)}
+          className="text-surface-500 hover:text-surface-300 transition-colors text-xs font-mono border border-surface-700 rounded px-1"
+          title="Keyboard shortcuts (?)"
+        >
+          ?
+        </button>
       </div>
     </footer>
   );

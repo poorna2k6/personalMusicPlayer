@@ -97,8 +97,36 @@ export function usePlayerStore() {
     setIsPlaying(prev => !prev);
   }, []);
 
-  const nextTrack = useCallback(() => {
+  const nextTrack = useCallback((currentTimeArg, durationArg) => {
     if (queue.length === 0) return;
+
+    // Track skip signal: if called manually before track ends, record completion %
+    if (currentTrack && durationArg > 0) {
+      const completionPct = Math.min(1, currentTimeArg / durationArg);
+      const wasSkipped = completionPct < 0.5;
+
+      // Update preference weights based on listening behavior
+      try {
+        const prefsRaw = localStorage.getItem('user-preferences');
+        const prefs = prefsRaw ? JSON.parse(prefsRaw) : { artistWeights: {}, genreWeights: {} };
+        const artist = currentTrack.artist;
+        const genre = currentTrack.genre;
+
+        const delta = wasSkipped ? -0.5 : completionPct >= 0.9 ? 1.0 : 0.3;
+
+        if (artist) {
+          prefs.artistWeights[artist] = Math.max(-5, Math.min(10,
+            (prefs.artistWeights[artist] || 0) + delta
+          ));
+        }
+        if (genre) {
+          prefs.genreWeights[genre] = Math.max(-5, Math.min(10,
+            (prefs.genreWeights[genre] || 0) + delta
+          ));
+        }
+        localStorage.setItem('user-preferences', JSON.stringify(prefs));
+      } catch { /* silently fail */ }
+    }
 
     // Track what was just played for DJ recommendations
     if (currentTrack) {

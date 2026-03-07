@@ -54,3 +54,40 @@ input[type="range"]::-moz-range-thumb {
   cursor: pointer;
   border: none;
 }
+
+/* Equalizer bar animations for Now Playing indicators */
+@keyframes eq1 {
+  0%, 100% { height: 4px; }
+  50% { height: 14px; }
+}
+@keyframes eq2 {
+  0%, 100% { height: 10px; }
+  33% { height: 4px; }
+  66% { height: 14px; }
+}
+@keyframes eq3 {
+  0%, 100% { height: 7px; }
+  40% { height: 14px; }
+  80% { height: 3px; }
+}
+
+/* Subtle pulse for album art while playing */
+@keyframes pulse-subtle {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.025); }
+}
+
+/* Track title fade-up transition */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeUp {
+  animation: fadeUp 180ms ease-out both;
+}
+
+.animate-eq1 { animation: eq1 0.8s ease-in-out infinite; }
+.animate-eq2 { animation: eq2 0.6s ease-in-out infinite; }
+.animate-eq3 { animation: eq3 1.0s ease-in-out infinite; }
+.animate-pulse-subtle { animation: pulse-subtle 2s ease-in-out infinite; }

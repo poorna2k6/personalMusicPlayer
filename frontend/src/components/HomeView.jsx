@@ -5,6 +5,35 @@ import { getUserRecommendations, getUserHistory } from '../api';
 
 const MIN_MIX_TRACKS = 3;
 
+// Seeded PRNG (Mulberry32) — same seed = same shuffle every time
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function getDailySeed(mixId = '') {
+  const today = new Date().toDateString();
+  let hash = 0;
+  for (const ch of today + mixId) {
+    hash = (((hash << 5) - hash) + ch.charCodeAt(0)) | 0;
+  }
+  return hash;
+}
+
+function seededShuffle(arr, seed) {
+  const rng = mulberry32(seed);
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
 const MIX_DEFINITIONS = [
   { id: 'romantic',   label: 'Love & Romance',   desc: 'Soft feelings, warm melodies',        gradient: 'from-rose-600 to-pink-700',    keywords: ['romantic', 'romance', 'love', 'prema', 'jaan', 'pyar', 'heart', 'ishq', 'dil'] },
   { id: 'folk',       label: 'Folk Vibes',        desc: 'Traditional beats from the soil',     gradient: 'from-amber-600 to-orange-700', keywords: ['folk', 'telangana', 'janapadha', 'traditional', 'paata'] },
@@ -29,11 +58,11 @@ function buildMixTracks(tracks, definition) {
     const text = `${t.genre || ''} ${t.title} ${t.album}`.toLowerCase();
     return definition.keywords.some(kw => text.includes(kw));
   });
-  return [...matched].sort(() => Math.random() - 0.5);
+  return seededShuffle(matched, getDailySeed(definition.id));
 }
 
 function buildAllMix(tracks) {
-  return [...tracks].sort(() => Math.random() - 0.5);
+  return seededShuffle(tracks, getDailySeed('all'));
 }
 
 export default function HomeView({ tracks, player, playlists, onUpdate }) {
@@ -207,6 +236,7 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
             {allMix && (
               <MixCard
                 mix={allMix}
+                isCurrentlyPlaying={isPlaying && allMix.tracks.some(t => t.id === currentTrack?.id)}
                 onPlay={() => playAll(allMix.tracks)}
                 onDj={() => startDjSession(allMix.tracks[0], tracks)}
               />
@@ -215,6 +245,7 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
               <MixCard
                 key={mix.id}
                 mix={mix}
+                isCurrentlyPlaying={isPlaying && mix.tracks.some(t => t.id === currentTrack?.id)}
                 onPlay={() => playAll(mix.tracks)}
                 onDj={() => startDjSession(mix.tracks[0], tracks)}
               />
@@ -259,19 +290,40 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
   );
 }
 
-function MixCard({ mix, onPlay, onDj }) {
+function MixCard({ mix, onPlay, onDj, isCurrentlyPlaying }) {
   return (
-    <div className="group relative rounded-xl overflow-hidden cursor-pointer" onClick={onPlay}>
+    <div
+      className={`group relative rounded-xl overflow-hidden cursor-pointer transition-all duration-200 ${
+        isCurrentlyPlaying ? 'ring-2 ring-indigo-400 scale-[1.03]' : 'hover:scale-[1.02]'
+      }`}
+      onClick={onPlay}
+    >
       <div className={`w-full aspect-square bg-gradient-to-br ${mix.gradient} flex flex-col items-start justify-end p-3`}>
         <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors" />
+
+        {/* Animated equalizer bars shown when this mix is playing */}
+        {isCurrentlyPlaying && (
+          <div className="absolute top-2 left-2 flex items-end gap-[2px] h-4">
+            <span className="w-[3px] rounded-sm bg-white animate-eq1" style={{ height: '4px' }} />
+            <span className="w-[3px] rounded-sm bg-white animate-eq2" style={{ height: '10px' }} />
+            <span className="w-[3px] rounded-sm bg-white animate-eq3" style={{ height: '7px' }} />
+          </div>
+        )}
+
         <button
           className="absolute bottom-3 right-3 w-9 h-9 rounded-full bg-white/90 flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all"
           onClick={(e) => { e.stopPropagation(); onPlay(); }}
           title="Play mix"
         >
-          <svg className="w-4 h-4 text-surface-900 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z" />
-          </svg>
+          {isCurrentlyPlaying ? (
+            <svg className="w-4 h-4 text-surface-900" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4 text-surface-900 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          )}
         </button>
         <button
           className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
@@ -282,7 +334,9 @@ function MixCard({ mix, onPlay, onDj }) {
         </button>
       </div>
       <div className="pt-2 pb-1 px-0.5">
-        <p className="text-sm font-semibold text-white leading-snug truncate">{mix.label}</p>
+        <p className={`text-sm font-semibold leading-snug truncate ${isCurrentlyPlaying ? 'text-indigo-300' : 'text-white'}`}>
+          {mix.label}
+        </p>
         <p className="text-xs text-surface-400 truncate">{mix.tracks.length} tracks · {mix.desc}</p>
       </div>
     </div>
