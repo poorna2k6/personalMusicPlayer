@@ -34,10 +34,11 @@ export default function Player({ player }) {
   const [playbackError, setPlaybackError] = useState(null);
   const [accentColor, setAccentColor] = useState(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showUpNext, setShowUpNext] = useState(false);
   const [titleKey, setTitleKey] = useState(0); // triggers fade animation on track change
   const {
     currentTrack, isPlaying, volume, currentTime, duration,
-    shuffle, repeat, djMode,
+    shuffle, repeat, djMode, queue, currentIndex,
     setCurrentTime, setDuration, setIsPlaying,
     togglePlay, nextTrack, prevTrack, setVolume,
     toggleShuffle, toggleRepeat, toggleDjMode,
@@ -159,7 +160,75 @@ export default function Player({ player }) {
     );
   }
 
+  // Compute the upcoming tracks slice for the "Up Next" panel
+  const upNextTracks = djMode && queue.length > 0
+    ? queue.slice(currentIndex, currentIndex + 6) // index 0 is current, 1-5 are upcoming
+    : [];
+
   return (
+    <>
+      {/* Up Next DJ Queue Panel — slides in above the player when open */}
+      {djMode && showUpNext && (
+        <div className="border-t border-indigo-800/60 bg-surface-900/95 backdrop-blur shrink-0 animate-fadeUp">
+          <div className="px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold uppercase tracking-widest text-indigo-400">Up Next — Auto DJ</span>
+              <button
+                onClick={() => setShowUpNext(false)}
+                className="text-surface-500 hover:text-white text-lg leading-none transition-colors"
+                title="Close queue"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="space-y-1">
+              {upNextTracks.map((track, i) => {
+                const isCurrentlyPlaying = i === 0;
+                return (
+                  <div
+                    key={`upnext-${track.id}-${currentIndex + i}`}
+                    className={`flex items-center gap-3 px-2 py-1.5 rounded-lg transition-colors ${
+                      isCurrentlyPlaying
+                        ? 'bg-indigo-600/20 border border-indigo-500/30'
+                        : 'hover:bg-surface-800/60'
+                    }`}
+                  >
+                    <span className={`text-xs w-5 text-center shrink-0 font-mono ${isCurrentlyPlaying ? 'text-indigo-400' : 'text-surface-500'}`}>
+                      {isCurrentlyPlaying ? (
+                        <span className="inline-flex items-end gap-[2px] h-3">
+                          <span className="w-[2px] rounded-sm bg-indigo-400 animate-eq1" style={{ height: '3px' }} />
+                          <span className="w-[2px] rounded-sm bg-indigo-400 animate-eq2" style={{ height: '8px' }} />
+                          <span className="w-[2px] rounded-sm bg-indigo-400 animate-eq3" style={{ height: '5px' }} />
+                        </span>
+                      ) : (
+                        currentIndex + i + 1
+                      )}
+                    </span>
+                    <img
+                      src={getCoverUrl(track.id)}
+                      alt=""
+                      className="w-8 h-8 rounded object-cover shrink-0 bg-surface-700"
+                      onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-xs font-medium truncate ${isCurrentlyPlaying ? 'text-white' : 'text-surface-200'}`}>
+                        {track.title}
+                        {isCurrentlyPlaying && (
+                          <span className="ml-1.5 text-[9px] font-bold text-indigo-400 uppercase tracking-wide">Now Playing</span>
+                        )}
+                      </p>
+                      <p className="text-[11px] text-surface-400 truncate">{track.artist}</p>
+                    </div>
+                  </div>
+                );
+              })}
+              {upNextTracks.length <= 1 && (
+                <p className="text-xs text-surface-500 px-2 py-1">Raagam will pick more tracks automatically as you listen.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     <footer
       className="h-24 border-t border-surface-800 flex items-center px-4 gap-4 relative shrink-0 transition-all duration-700"
       style={{ background: accentColor ? `linear-gradient(to right, ${accentColor} 0%, #0f172a 55%)` : '#0f172a' }}
@@ -205,9 +274,9 @@ export default function Player({ player }) {
           <p key={`title-${titleKey}`} className="text-sm font-medium truncate animate-fadeUp">{currentTrack.title}</p>
           <p key={`artist-${titleKey}`} className="text-xs text-surface-400 truncate animate-fadeUp" style={{ animationDelay: '30ms' }}>{currentTrack.artist}</p>
           {djMode && (
-            <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-600/30 text-indigo-300 border border-indigo-500/30">
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-              DJ MODE
+            <span className="inline-flex items-center gap-1 mt-0.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-500/25 text-indigo-200 border border-indigo-400/50 shadow-sm shadow-indigo-900/50">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-pulse" />
+              🎧 DJ MODE
             </span>
           )}
         </div>
