@@ -66,12 +66,13 @@ function buildAllMix(tracks) {
 }
 
 export default function HomeView({ tracks, player, playlists, onUpdate }) {
-  const { playAll, playTrack, currentTrack, isPlaying, recentlyPlayed, startDjSession } = player;
+  const { playAll, playTrack, currentTrack, isPlaying, recentlyPlayed, startDjSession, djMode, toggleDjMode } = player;
   const { authState, user, token } = useAuth();
 
   const [recommendations, setRecommendations] = useState([]);
   const [userHistory, setUserHistory] = useState([]);
   const [recLoading, setRecLoading] = useState(false);
+  const [djBannerDismissed, setDjBannerDismissed] = useState(false);
 
   const isLoggedIn = authState === 'authenticated';
 
@@ -90,6 +91,11 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
         .finally(() => setRecLoading(false));
     }
   }, [isLoggedIn, token]);
+
+  // Reset banner dismiss state whenever DJ mode turns on
+  useEffect(() => {
+    if (djMode) setDjBannerDismissed(false);
+  }, [djMode]);
 
   const greeting = getTimeGreeting();
   const hasLibrary = tracks.length > 0;
@@ -120,6 +126,32 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
         )}
       </div>
 
+      {/* DJ Session Active banner */}
+      {djMode && !djBannerDismissed && (
+        <div className="flex items-center gap-3 bg-indigo-950/70 border border-indigo-700/60 rounded-xl px-4 py-3">
+          <span className="text-xl shrink-0">🎧</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-indigo-200 font-semibold text-sm">Auto DJ is running — sit back and enjoy</p>
+            <p className="text-indigo-400/80 text-xs mt-0.5">Raagam is choosing your next tracks automatically based on mood, variety, and your listening history.</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={toggleDjMode}
+              className="px-3 py-1.5 rounded-lg bg-indigo-700/50 hover:bg-indigo-600/60 text-indigo-200 text-xs font-semibold border border-indigo-600/50 transition-colors"
+            >
+              Stop DJ
+            </button>
+            <button
+              onClick={() => setDjBannerDismissed(true)}
+              className="text-indigo-500 hover:text-indigo-300 text-lg leading-none transition-colors"
+              title="Dismiss"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Guest nudge — only shown when skipped */}
       {authState === 'skipped' && (
         <div className="flex items-start gap-3 bg-indigo-950/50 border border-indigo-800/50 rounded-xl p-4">
@@ -138,7 +170,7 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
       {/* Quick-play: All songs + DJ mode */}
       {hasLibrary && (
         <section>
-          <div className="flex gap-3 flex-wrap">
+          <div className="flex gap-3 flex-wrap items-start">
             <button
               onClick={() => playAll(buildAllMix(tracks))}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold transition-colors"
@@ -146,17 +178,26 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
               <PlayIcon />
               Play All (Shuffled)
             </button>
-            <button
-              onClick={() => {
-                const seed = tracks[Math.floor(Math.random() * tracks.length)];
-                startDjSession(seed, tracks);
-              }}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-surface-700 hover:bg-surface-600 text-sm font-semibold transition-colors border border-surface-600"
-              title="Start Party DJ — endless music, no repeats, always varied"
-            >
-              <DjIcon />
-              Start Party DJ
-            </button>
+            <div className="flex flex-col gap-0.5">
+              <button
+                onClick={() => {
+                  const seed = tracks[Math.floor(Math.random() * tracks.length)];
+                  startDjSession(seed, tracks);
+                }}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
+                  djMode
+                    ? 'bg-indigo-600/30 border-indigo-500/60 text-indigo-200'
+                    : 'bg-surface-700 hover:bg-surface-600 border-surface-600 text-white'
+                }`}
+                title="Auto DJ — Raagam picks what plays next, no repeats, always varied"
+              >
+                <DjIcon />
+                {djMode ? '🎧 Auto DJ Running' : 'Auto DJ — Endless Mix'}
+              </button>
+              {!djMode && (
+                <p className="text-xs text-surface-500 px-1">Raagam picks what plays next, no skips, always varied</p>
+              )}
+            </div>
           </div>
         </section>
       )}

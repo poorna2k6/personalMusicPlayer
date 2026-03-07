@@ -380,15 +380,37 @@ export default function Player({ player }) {
         </div>
       )}
 
-      {/* Right side: DJ Mode + Volume */}
-      <div className="flex items-center gap-3 w-48 shrink-0 justify-end">
+      {/* Right side: DJ Mode + Up Next + Volume */}
+      <div className="flex items-center gap-2 w-64 shrink-0 justify-end">
+        {/* Up Next toggle — only shown in DJ mode */}
+        {djMode && (
+          <button
+            onClick={() => setShowUpNext(prev => !prev)}
+            title="Show / hide upcoming tracks"
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all border ${
+              showUpNext
+                ? 'bg-indigo-600/30 border-indigo-500/60 text-indigo-200'
+                : 'bg-surface-800 border-surface-700 text-surface-400 hover:text-white hover:border-surface-600'
+            }`}
+          >
+            Up Next {showUpNext ? '▼' : '▲'}
+          </button>
+        )}
+
+        {/* Track position indicator in DJ mode */}
+        {djMode && currentIndex >= 0 && (
+          <span className="text-[10px] text-indigo-400/80 font-mono whitespace-nowrap">
+            Track {currentIndex + 1}
+          </span>
+        )}
+
         {/* Party DJ toggle */}
         <button
           onClick={toggleDjMode}
-          title={djMode ? 'DJ Mode ON — click to disable' : 'Enable Party DJ Mode'}
+          title={djMode ? 'Auto DJ ON — click to stop' : 'Enable Auto DJ — endless music, always varied'}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${
             djMode
-              ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-300'
+              ? 'bg-indigo-600/30 border-indigo-500/60 text-indigo-200 shadow-sm shadow-indigo-900/50'
               : 'bg-surface-800 border-surface-700 text-surface-400 hover:text-white hover:border-surface-600'
           }`}
         >
@@ -432,5 +454,6 @@ export default function Player({ player }) {
         </button>
       </div>
     </footer>
+    </>
   );
 }
