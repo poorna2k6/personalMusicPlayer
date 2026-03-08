@@ -48,7 +48,11 @@ export default function Player({ player }) {
   useEffect(() => {
     if (!currentTrack) { setAccentColor(null); return; }
     setTitleKey(k => k + 1); // trigger title fade animation
-    extractDominantColor(getCoverUrl(currentTrack.id), setAccentColor);
+    // Don't reset color to null — keep the previous color until the new one is ready
+    // to avoid a jarring snap-to-black between tracks
+    extractDominantColor(getCoverUrl(currentTrack.id), (color) => {
+      if (color) setAccentColor(color);
+    });
   }, [currentTrack?.id]);
 
   // Sync audio element with player state

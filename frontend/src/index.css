@@ -2,6 +2,81 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme: Slate Dark (default) ── */
+:root {
+  --s50:  #f8fafc;
+  --s100: #f1f5f9;
+  --s200: #e2e8f0;
+  --s300: #cbd5e1;
+  --s400: #94a3b8;
+  --s500: #64748b;
+  --s600: #475569;
+  --s700: #334155;
+  --s800: #1e293b;
+  --s900: #0f172a;
+  --s950: #020617;
+}
+
+/* ── Theme: AMOLED Black ── */
+.theme-amoled {
+  --s50:  #f0f0f0;
+  --s100: #e0e0e0;
+  --s200: #c0c0c0;
+  --s300: #a0a0a0;
+  --s400: #808080;
+  --s500: #606060;
+  --s600: #404040;
+  --s700: #2a2a2a;
+  --s800: #141414;
+  --s900: #080808;
+  --s950: #000000;
+}
+
+/* ── Theme: Deep Purple ── */
+.theme-purple {
+  --s50:  #faf5ff;
+  --s100: #f3e8ff;
+  --s200: #e9d5ff;
+  --s300: #d8b4fe;
+  --s400: #a78bfa;
+  --s500: #7c3aed;
+  --s600: #5b21b6;
+  --s700: #3b0764;
+  --s800: #2e1065;
+  --s900: #1a0533;
+  --s950: #0d0118;
+}
+
+/* ── Theme: Warm Ember ── */
+.theme-warm {
+  --s50:  #fff8f1;
+  --s100: #feecdc;
+  --s200: #fcd9bd;
+  --s300: #fdba8c;
+  --s400: #ff8a4c;
+  --s500: #ff5a1f;
+  --s600: #d03801;
+  --s700: #b43403;
+  --s800: #2d1a0e;
+  --s900: #1c0e05;
+  --s950: #0d0602;
+}
+
+/* ── Theme: Forest Dark ── */
+.theme-forest {
+  --s50:  #f0fdf4;
+  --s100: #dcfce7;
+  --s200: #bbf7d0;
+  --s300: #86efac;
+  --s400: #4ade80;
+  --s500: #22c55e;
+  --s600: #15803d;
+  --s700: #14532d;
+  --s800: #0f2d1a;
+  --s900: #071a0e;
+  --s950: #020d07;
+}
+
 * {
   margin: 0;
   padding: 0;

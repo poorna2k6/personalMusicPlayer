@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import TrackRow from './TrackRow';
 import { useAuth } from '../context/AuthContext';
 import { getUserRecommendations, getUserHistory } from '../api';
@@ -100,13 +100,17 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
   const greeting = getTimeGreeting();
   const hasLibrary = tracks.length > 0;
 
-  const dailyMixes = MIX_DEFINITIONS
-    .map(def => ({ ...def, tracks: buildMixTracks(tracks, def) }))
-    .filter(mix => mix.tracks.length >= MIN_MIX_TRACKS);
+  const dailyMixes = useMemo(() => (
+    MIX_DEFINITIONS
+      .map(def => ({ ...def, tracks: buildMixTracks(tracks, def) }))
+      .filter(mix => mix.tracks.length >= MIN_MIX_TRACKS)
+  ), [tracks]);
 
-  const allMix = hasLibrary
-    ? { id: 'all', label: 'All Songs Mix', desc: 'Your entire library, shuffled', gradient: 'from-indigo-600 to-purple-700', tracks: buildAllMix(tracks) }
-    : null;
+  const allMix = useMemo(() => (
+    hasLibrary
+      ? { id: 'all', label: 'All Songs Mix', desc: 'Your entire library, shuffled', gradient: 'from-indigo-600 to-purple-700', tracks: buildAllMix(tracks) }
+      : null
+  ), [hasLibrary, tracks]);
 
   const recentTracks = recentlyPlayed.slice(0, 5);
 
@@ -181,8 +185,12 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
             <div className="flex flex-col gap-0.5">
               <button
                 onClick={() => {
-                  const seed = tracks[Math.floor(Math.random() * tracks.length)];
-                  startDjSession(seed, tracks);
+                  if (djMode) {
+                    toggleDjMode();
+                  } else {
+                    const seed = tracks[Math.floor(Math.random() * tracks.length)];
+                    startDjSession(seed, tracks);
+                  }
                 }}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
                   djMode

@@ -189,7 +189,10 @@ export function usePlayerStore() {
   }, []);
 
   const addToQueue = useCallback((track) => {
-    setQueue(prev => [...prev, track]);
+    setQueue(prev => {
+      if (prev.some(t => t.id === track.id)) return prev;
+      return [...prev, track];
+    });
   }, []);
 
   const toggleDjMode = useCallback(() => {

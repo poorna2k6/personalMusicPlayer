@@ -4,11 +4,17 @@ import { useToast } from './Toast';
 
 export default function TrackRow({ track, index, isActive, isPlaying, onPlay, playlists, onUpdate, player }) {
   const [showMenu, setShowMenu] = useState(false);
-  const [liked, setLiked] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('liked-tracks') || '[]').includes(track.id); } catch { return false; }
-  });
+  const [liked, setLiked] = useState(false);
   const menuRef = useRef(null);
   const showToast = useToast();
+
+  useEffect(() => {
+    try {
+      setLiked(JSON.parse(localStorage.getItem('liked-tracks') || '[]').includes(track.id));
+    } catch {
+      setLiked(false);
+    }
+  }, [track.id]);
 
   useEffect(() => {
     const handleClick = (e) => {
@@ -35,9 +41,10 @@ export default function TrackRow({ track, index, isActive, isPlaying, onPlay, pl
   };
 
   const handleAddToQueue = () => {
+    const alreadyQueued = player.queue?.some(t => t.id === track.id);
     player.addToQueue(track);
     setShowMenu(false);
-    showToast('Added to queue', 'success');
+    showToast(alreadyQueued ? 'Already in queue' : 'Added to queue', alreadyQueued ? 'default' : 'success');
   };
 
   const handleLike = (e) => {
