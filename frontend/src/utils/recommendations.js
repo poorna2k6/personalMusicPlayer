@@ -90,11 +90,16 @@ export function getPartyDJRecommendations(currentTrack, allTracks, recentlyPlaye
   const candidates = allTracks.filter(t => !playedIds.has(t.id));
 
   // If library is small and we've exhausted unplayed tracks, allow played ones back in
-  // but still exclude the immediate last 3 to avoid jarring repeats
-  const lastThreeIds = new Set(recentlyPlayed.slice(0, 3).map(t => t.id));
+  // but still exclude the immediate last 5 to avoid jarring repeats
+  const lastFiveIds = new Set(recentlyPlayed.slice(0, 5).map(t => t.id));
+  const relaxedPool = allTracks.filter(t => t.id !== currentTrack.id && !lastFiveIds.has(t.id));
+
+  // Last resort for very small libraries: exclude only the immediately previous track
+  const finalFallback = allTracks.filter(t => t.id !== currentTrack.id && t.id !== recentlyPlayed[0]?.id);
+
   const pool = candidates.length >= count
     ? candidates
-    : allTracks.filter(t => t.id !== currentTrack.id && !lastThreeIds.has(t.id));
+    : relaxedPool.length > 0 ? relaxedPool : finalFallback;
 
   if (pool.length === 0) return [];
 

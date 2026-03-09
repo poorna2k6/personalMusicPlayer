@@ -3,7 +3,7 @@ import { getPartyDJRecommendations } from '../utils/recommendations';
 
 const STORAGE_KEY = 'music-player-state';
 const STATE_VERSION = 3; // Bump this to force-clear stale localStorage on breaking changes
-const MAX_SAVED_QUEUE = 30; // Cap queue saved to localStorage to avoid quota errors
+const MAX_SAVED_QUEUE = 50; // Cap queue saved to localStorage to avoid quota errors
 
 function loadState() {
   try {
@@ -195,6 +195,12 @@ export function usePlayerStore() {
     });
   }, []);
 
+  const removeFromQueue = useCallback((queueIndex) => {
+    setQueue(prev => prev.filter((_, idx) => idx !== queueIndex));
+    // If removing a track before currentIndex, shift the pointer down so current track stays
+    setCurrentIndex(prevIdx => queueIndex < prevIdx ? prevIdx - 1 : prevIdx);
+  }, []);
+
   const toggleDjMode = useCallback(() => {
     setDjMode(prev => !prev);
   }, []);
@@ -202,6 +208,17 @@ export function usePlayerStore() {
   const updateAllTracks = useCallback((tracks) => {
     setAllTracks(tracks);
   }, []);
+
+  // On reload: if DJ mode was active but the saved queue is small, top it up automatically
+  useEffect(() => {
+    if (djMode && currentTrack && allTracks.length > 0 && queue.length - currentIndex <= 3) {
+      const recs = getPartyDJRecommendations(currentTrack, allTracks, playedTracks);
+      if (recs.length > 0) {
+        setQueue(prev => [...prev, ...recs]);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [djMode, allTracks.length]); // only fires when allTracks arrives after async load
 
   // Kick off a DJ session from the current track
   const startDjSession = useCallback((seedTrack, trackPool) => {
@@ -219,7 +236,7 @@ export function usePlayerStore() {
     shuffle, repeat, djMode, recentlyPlayed, allTracks,
     setVolume, setCurrentTime, setDuration, setIsPlaying,
     playTrack, playAll, togglePlay, nextTrack, prevTrack,
-    toggleShuffle, toggleRepeat, addToQueue,
+    toggleShuffle, toggleRepeat, addToQueue, removeFromQueue,
     toggleDjMode, updateAllTracks, startDjSession,
     // Keep backward compat alias
     smartAutoPlay: djMode,

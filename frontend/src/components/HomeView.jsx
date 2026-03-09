@@ -194,16 +194,16 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
                 }}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
                   djMode
-                    ? 'bg-indigo-600/30 border-indigo-500/60 text-indigo-200'
+                    ? 'bg-rose-600/25 border-rose-500/50 text-rose-300 hover:bg-rose-600/35'
                     : 'bg-surface-700 hover:bg-surface-600 border-surface-600 text-white'
                 }`}
-                title="Auto DJ — Raagam picks what plays next, no repeats, always varied"
+                title={djMode ? 'Stop Auto DJ session' : 'Auto DJ — Raagam picks what plays next, no repeats, always varied'}
               >
                 <DjIcon />
-                {djMode ? '🎧 Auto DJ Running' : 'Auto DJ — Endless Mix'}
+                {djMode ? '⏹ Stop DJ' : 'Auto DJ — Endless Mix'}
               </button>
               {!djMode && (
-                <p className="text-xs text-surface-500 px-1">Raagam picks what plays next, no skips, always varied</p>
+                <p className="text-xs text-surface-500 px-1">Raagam picks what plays next, no repeats, always varied</p>
               )}
             </div>
           </div>

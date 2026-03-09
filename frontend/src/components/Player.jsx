@@ -29,8 +29,12 @@ function extractDominantColor(imgSrc, callback) {
   img.src = imgSrc;
 }
 
+const CROSSFADE_STEPS = 20;
+const CROSSFADE_MS = 60; // ms per step → 1.2 s total
+
 export default function Player({ player }) {
   const audioRef = useRef(null);
+  const fadeIntervalRef = useRef(null);
   const [playbackError, setPlaybackError] = useState(null);
   const [accentColor, setAccentColor] = useState(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -42,6 +46,7 @@ export default function Player({ player }) {
     setCurrentTime, setDuration, setIsPlaying,
     togglePlay, nextTrack, prevTrack, setVolume,
     toggleShuffle, toggleRepeat, toggleDjMode,
+    removeFromQueue,
   } = player;
 
   // Extract dominant color from album art on track change
@@ -55,28 +60,89 @@ export default function Player({ player }) {
     });
   }, [currentTrack?.id]);
 
-  // Sync audio element with player state
+  // Sync audio element with player state — crossfades in DJ mode on track changes
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
 
     setPlaybackError(null);
-    const src = getAudioUrl(currentTrack.file_path);
-    if (audio.src !== new URL(src, window.location.origin).href) {
-      audio.src = src;
+    const newSrc = getAudioUrl(currentTrack.file_path);
+    const isSameSrc = audio.src === new URL(newSrc, window.location.origin).href;
+
+    // Cancel any in-progress fade
+    if (fadeIntervalRef.current) {
+      clearInterval(fadeIntervalRef.current);
+      fadeIntervalRef.current = null;
+      audio.volume = volume;
     }
 
-    if (isPlaying) {
-      audio.play().catch((err) => {
-        if (err.name !== 'AbortError') {
-          setPlaybackError('Could not play this track. The file may be missing or unsupported.');
-          setIsPlaying(false);
-        }
-      });
-    } else {
-      audio.pause();
+    if (isSameSrc) {
+      // Same track — just play/pause
+      if (isPlaying) {
+        audio.play().catch((err) => {
+          if (err.name !== 'AbortError') {
+            setPlaybackError('Could not play this track. The file may be missing or unsupported.');
+            setIsPlaying(false);
+          }
+        });
+      } else {
+        audio.pause();
+      }
+      return;
     }
-  }, [currentTrack, isPlaying]);
+
+    // New track — crossfade only in DJ mode if audio is actively playing
+    const shouldCrossfade = djMode && isPlaying && !audio.paused && audio.currentTime > 0;
+
+    if (shouldCrossfade) {
+      const startVol = audio.volume;
+      let step = 0;
+      fadeIntervalRef.current = setInterval(() => {
+        step++;
+        audio.volume = Math.max(0, startVol * (1 - step / CROSSFADE_STEPS));
+        if (step >= CROSSFADE_STEPS) {
+          clearInterval(fadeIntervalRef.current);
+          fadeIntervalRef.current = null;
+          doSwitch();
+        }
+      }, CROSSFADE_MS);
+    } else {
+      doSwitch();
+    }
+
+    function doSwitch() {
+      audio.src = newSrc;
+      if (isPlaying) {
+        audio.volume = 0;
+        audio.play().catch((err) => {
+          if (err.name !== 'AbortError') {
+            setPlaybackError('Could not play this track. The file may be missing or unsupported.');
+            setIsPlaying(false);
+          }
+        });
+        const targetVol = volume;
+        let step = 0;
+        fadeIntervalRef.current = setInterval(() => {
+          step++;
+          audio.volume = Math.min(targetVol, targetVol * (step / CROSSFADE_STEPS));
+          if (step >= CROSSFADE_STEPS) {
+            clearInterval(fadeIntervalRef.current);
+            fadeIntervalRef.current = null;
+            audio.volume = targetVol;
+          }
+        }, CROSSFADE_MS);
+      } else {
+        audio.volume = volume;
+      }
+    }
+
+    return () => {
+      if (fadeIntervalRef.current) {
+        clearInterval(fadeIntervalRef.current);
+        fadeIntervalRef.current = null;
+      }
+    };
+  }, [currentTrack, isPlaying, djMode]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -166,8 +232,9 @@ export default function Player({ player }) {
 
   // Compute the upcoming tracks slice for the "Up Next" panel
   const upNextTracks = djMode && queue.length > 0
-    ? queue.slice(currentIndex, currentIndex + 6) // index 0 is current, 1-5 are upcoming
+    ? queue.slice(currentIndex, currentIndex + 13) // index 0 is current, 1-12 are upcoming
     : [];
+  const isQueueRunningLow = djMode && (queue.length - currentIndex) <= 3;
 
   return (
     <>
@@ -185,13 +252,22 @@ export default function Player({ player }) {
                 &times;
               </button>
             </div>
-            <div className="space-y-1">
+            {isQueueRunningLow && (
+              <div className="mb-2 px-2 py-1.5 rounded-md bg-amber-900/30 border border-amber-700/40 text-amber-300 text-xs flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+                Queue running low — fetching more tracks…
+              </div>
+            )}
+            <div className="space-y-0.5 max-h-64 overflow-y-auto pr-0.5">
               {upNextTracks.map((track, i) => {
+                const queueIndex = currentIndex + i;
                 const isCurrentlyPlaying = i === 0;
                 return (
                   <div
-                    key={`upnext-${track.id}-${currentIndex + i}`}
-                    className={`flex items-center gap-3 px-2 py-1.5 rounded-lg transition-colors ${
+                    key={`upnext-${track.id}-${queueIndex}`}
+                    className={`flex items-center gap-3 px-2 py-1.5 rounded-lg transition-colors group ${
                       isCurrentlyPlaying
                         ? 'bg-indigo-600/20 border border-indigo-500/30'
                         : 'hover:bg-surface-800/60'
@@ -205,7 +281,7 @@ export default function Player({ player }) {
                           <span className="w-[2px] rounded-sm bg-indigo-400 animate-eq3" style={{ height: '5px' }} />
                         </span>
                       ) : (
-                        currentIndex + i + 1
+                        queueIndex + 1
                       )}
                     </span>
                     <img
@@ -223,10 +299,22 @@ export default function Player({ player }) {
                       </p>
                       <p className="text-[11px] text-surface-400 truncate">{track.artist}</p>
                     </div>
+                    {/* Remove from queue button — hidden until hover, not shown for current track */}
+                    {!isCurrentlyPlaying && removeFromQueue && (
+                      <button
+                        onClick={() => removeFromQueue(queueIndex)}
+                        className="opacity-0 group-hover:opacity-100 shrink-0 p-1 text-surface-600 hover:text-rose-400 transition-all"
+                        title="Remove from queue"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 );
               })}
-              {upNextTracks.length <= 1 && (
+              {upNextTracks.length <= 1 && !isQueueRunningLow && (
                 <p className="text-xs text-surface-500 px-2 py-1">Raagam will pick more tracks automatically as you listen.</p>
               )}
             </div>
@@ -411,7 +499,7 @@ export default function Player({ player }) {
         {/* Party DJ toggle */}
         <button
           onClick={toggleDjMode}
-          title={djMode ? 'Auto DJ ON — click to stop' : 'Enable Auto DJ — endless music, always varied'}
+          title={djMode ? 'Stop DJ session' : 'Enable Auto DJ — endless music, always varied'}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${
             djMode
               ? 'bg-indigo-600/30 border-indigo-500/60 text-indigo-200 shadow-sm shadow-indigo-900/50'
