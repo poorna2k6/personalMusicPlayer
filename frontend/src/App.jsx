@@ -309,37 +309,30 @@ function SettingsDropdown({ theme, setTheme, scanning, onScan, authState, user, 
 
       {/* APPEARANCE */}
       <div>
-        <div className="px-4 pt-3 pb-1">
+        <div className="px-4 pt-3 pb-2">
           <span className="text-[10px] font-semibold uppercase tracking-widest text-surface-500">Appearance</span>
         </div>
-        <div className="px-2 pb-2">
-          {THEMES.map((t) => {
-            const active = theme === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setTheme(t.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors group ${
-                  active
-                    ? 'bg-indigo-600/15 text-white'
-                    : 'text-surface-300 hover:bg-surface-800 hover:text-white'
-                }`}
+        <div className="px-3 pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <label className="text-[13px] text-surface-300 shrink-0">Theme</label>
+            <div className="flex items-center gap-2 flex-1 justify-end">
+              {/* Active swatch preview */}
+              <span className="flex items-center gap-0.5 shrink-0">
+                {(THEMES.find(t => t.id === theme) || THEMES[0]).swatch.map((c, i) => (
+                  <span key={i} className="w-2.5 h-2.5 rounded-sm" style={{ background: c }} />
+                ))}
+              </span>
+              <select
+                value={theme}
+                onChange={(e) => setTheme(e.target.value)}
+                className="bg-surface-800 border border-surface-700 text-surface-200 text-[13px] rounded-md px-2 py-1 focus:outline-none focus:border-indigo-500 cursor-pointer"
               >
-                {/* Colour swatch strip */}
-                <span className="flex items-center gap-0.5 shrink-0">
-                  {t.swatch.map((c, i) => (
-                    <span key={i} className="w-3 h-3 rounded-sm" style={{ background: c }} />
-                  ))}
-                </span>
-                <span className="flex-1 text-left text-[13px]">{t.label}</span>
-                {active && (
-                  <svg className="w-3.5 h-3.5 text-indigo-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-              </button>
-            );
-          })}
+                {THEMES.map(t => (
+                  <option key={t.id} value={t.id}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -388,6 +381,14 @@ function SettingsDropdown({ theme, setTheme, scanning, onScan, authState, user, 
           </div>
         </div>
       )}
+
+      {/* Footer — build stamp */}
+      <div className="border-t border-surface-800 px-4 py-2 flex items-center justify-between bg-surface-950/40">
+        <span className="text-[10px] text-surface-600 font-mono">
+          build {(() => { try { const d = new Date(__BUILD_TIME__); return `${d.toLocaleDateString('en-GB', { day:'2-digit', month:'short' })} ${d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' })}`; } catch { return 'dev'; } })()}
+        </span>
+        <span className="text-[10px] text-surface-700 font-mono">v1.0</span>
+      </div>
     </div>
   );
 }
