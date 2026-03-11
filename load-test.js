@@ -4,7 +4,7 @@ const autocannon = require('autocannon');
 
 const BASE_URL = 'http://localhost:5000';
 const CONNECTIONS = 100;
-const DURATION = 30;
+const DURATION = 30; // seconds per endpoint
 
 const endpoints = [
   { name: 'GET /api/health', path: '/api/health' },
