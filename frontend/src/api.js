@@ -142,7 +142,8 @@ export async function getUserHistory(token, limit = 50) {
   return res.json();
 }
 
-export async function recordPlayHistory(token, trackId) {
+// signals: { playDuration, completionPct, skipped, timeOfDay }
+export async function recordPlayHistory(token, trackId, signals = {}) {
   if (DEMO_MODE) return { ok: true };
   try {
     await fetch(`${API_BASE}/user/history`, {
@@ -151,7 +152,7 @@ export async function recordPlayHistory(token, trackId) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ trackId }),
+      body: JSON.stringify({ trackId, ...signals }),
     });
   } catch {
     // Non-critical — silently ignore recording failures

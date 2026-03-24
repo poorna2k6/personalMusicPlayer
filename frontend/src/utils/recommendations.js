@@ -1,27 +1,26 @@
 // Party DJ recommendation engine
-// Goal: variety first, smooth transitions second — never the same artist back-to-back
+// Spotify/YTM-style: preference-weighted scoring + mood transitions + taste breaker
 
 const MOOD_MAP = {
-  romantic: ['prema', 'love', 'jaan', 'pyar', 'romantic', 'heart', 'ishq', 'dil'],
-  folk:     ['folk', 'telangana', 'traditional', 'dance', 'janapadha', 'paata'],
+  romantic:  ['prema', 'love', 'jaan', 'pyar', 'romantic', 'heart', 'ishq', 'dil'],
+  folk:      ['folk', 'telangana', 'traditional', 'dance', 'janapadha', 'paata'],
   classical: ['classical', 'raaga', 'carnatic', 'hindustani', 'swaraalu'],
-  devotional: ['devotional', 'bhakti', 'temple', 'god', 'spiritual', 'mantra'],
-  party:    ['party', 'dance', 'beat', 'club', 'remix', 'dj'],
-  sad:      ['sad', 'cry', 'tears', 'pain', 'broken', 'farewell'],
+  devotional:['devotional', 'bhakti', 'temple', 'god', 'spiritual', 'mantra'],
+  party:     ['party', 'dance', 'beat', 'club', 'remix', 'dj'],
+  sad:       ['sad', 'cry', 'tears', 'pain', 'broken', 'farewell'],
 };
 
-// Moods that can transition into each other smoothly
 const MOOD_TRANSITIONS = {
-  romantic: ['romantic', 'sad', 'classical'],
-  folk:     ['folk', 'party', 'classical'],
+  romantic:  ['romantic', 'sad', 'classical'],
+  folk:      ['folk', 'party', 'classical'],
   classical: ['classical', 'devotional', 'romantic', 'folk'],
-  devotional: ['devotional', 'classical'],
-  party:    ['party', 'folk', 'romantic'],
-  sad:      ['sad', 'romantic', 'classical'],
-  null:     ['romantic', 'folk', 'classical', 'devotional', 'party', 'sad'],
+  devotional:['devotional', 'classical'],
+  party:     ['party', 'folk', 'romantic'],
+  sad:       ['sad', 'romantic', 'classical'],
+  null:      ['romantic', 'folk', 'classical', 'devotional', 'party', 'sad'],
 };
 
-function detectMood(track) {
+export function detectMood(track) {
   if (!track) return null;
   const text = `${track.title} ${track.album} ${track.genre || ''}`.toLowerCase();
   for (const [mood, keywords] of Object.entries(MOOD_MAP)) {
@@ -30,71 +29,119 @@ function detectMood(track) {
   return null;
 }
 
-// Scores a candidate track for how well it fits as the NEXT track in a party set.
-// Core principle: penalize repetition heavily, reward variety and smooth mood transitions.
-function scoreForPartyDJ(candidate, recentlyPlayed, currentMood) {
+// Load user preference weights from localStorage (written by usePlayerStore)
+function loadPreferences() {
+  try {
+    const raw = localStorage.getItem('user-preferences');
+    if (!raw) return { artistWeights: {}, genreWeights: {} };
+    return JSON.parse(raw);
+  } catch {
+    return { artistWeights: {}, genreWeights: {} };
+  }
+}
+
+// Score a candidate track for how well it fits next in a DJ session.
+// Combines: anti-clustering, mood transitions, and Spotify-style preference weights.
+function scoreForPartyDJ(candidate, recentlyPlayed, currentMood, prefs) {
   let score = 0;
 
-  // --- Anti-clustering: penalise artists/albums heard recently ---
+  // --- Anti-clustering: penalise recently heard artists/albums ---
   const last5Artists = recentlyPlayed.slice(0, 5).map(t => t.artist);
   const last3Artists = recentlyPlayed.slice(0, 3).map(t => t.artist);
   const last3Albums  = recentlyPlayed.slice(0, 3).map(t => t.album);
 
   const artistOccurrences = last5Artists.filter(a => a === candidate.artist).length;
-  score -= artistOccurrences * 30; // -30 each time the artist appeared in the last 5 tracks
+  score -= artistOccurrences * 30;
 
-  // Immediate repeat artist — hard block
-  if (recentlyPlayed[0]?.artist === candidate.artist) score -= 60;
-
-  // Repeat album in last 3 tracks — strong block
+  if (recentlyPlayed[0]?.artist === candidate.artist) score -= 60; // hard block same-artist repeat
   if (last3Albums.includes(candidate.album)) score -= 40;
 
   // --- Variety reward ---
-  if (!last3Artists.includes(candidate.artist)) score += 25;  // Fresh artist
-  if (last5Artists.filter(a => a === candidate.artist).length === 0) score += 10; // Not heard at all recently
+  if (!last3Artists.includes(candidate.artist)) score += 25;
+  if (artistOccurrences === 0) score += 10;
 
-  // --- Mood transition (smooth, not mood-locked) ---
+  // --- Mood transition ---
   const candidateMood = detectMood(candidate);
   const allowedMoods = MOOD_TRANSITIONS[currentMood] || MOOD_TRANSITIONS.null;
 
   if (currentMood && candidateMood === currentMood) {
-    score += 5;  // Same mood: small bonus (don't lock, just slightly prefer)
+    score += 5;
   } else if (allowedMoods.includes(candidateMood)) {
-    score += 15; // Adjacent/transition mood: good fit
+    score += 15;
   } else if (candidateMood !== null) {
-    score -= 10; // Jarring mood shift: small penalty
+    score -= 10;
   }
 
-  // --- Genre affinity (lighter weight than before) ---
+  // --- Genre affinity ---
   const recentGenres = recentlyPlayed.slice(0, 3).map(t => t.genre);
-  if (!recentGenres.includes(candidate.genre)) score += 10; // Genre variety bonus
-  if (candidate.genre && recentlyPlayed[0]?.genre === candidate.genre) score -= 5; // Gentle same-genre penalty
+  if (!recentGenres.includes(candidate.genre)) score += 10;
+  if (candidate.genre && recentlyPlayed[0]?.genre === candidate.genre) score -= 5;
 
   // --- Year affinity (small signal) ---
   if (recentlyPlayed[0] && Math.abs((candidate.year || 0) - (recentlyPlayed[0].year || 0)) <= 5) {
     score += 3;
   }
 
+  // --- User preference weight (Spotify-style taste signal) ---
+  // Artist preference: range -5 to +10 → maps to -15 to +20 DJ score bonus
+  const artistPref = prefs.artistWeights?.[candidate.artist] || 0;
+  score += artistPref * 2;
+
+  // Genre preference: range -5 to +10 → maps to -5 to +10 DJ score bonus
+  const genrePref = prefs.genreWeights?.[candidate.genre] || 0;
+  score += genrePref;
+
+  // Strong negative preference (artist frequently skipped) → hard penalty
+  if (artistPref < -2) score -= 30;
+
   return score;
 }
 
+// Select a "taste breaker" — a track that's deliberately outside the user's usual taste.
+// Used every ~7 tracks to inject discovery, like Spotify's "something different" card.
+function pickTasteBreaker(pool, recentlyPlayed, prefs) {
+  if (pool.length === 0) return null;
+
+  // Find artists that have low/zero preference weight (unexplored territory)
+  const lastArtist = recentlyPlayed[0]?.artist;
+  const candidates = pool.filter(t => {
+    const artistPref = prefs.artistWeights?.[t.artist] || 0;
+    return t.artist !== lastArtist && artistPref <= 1; // low familiarity
+  });
+
+  if (candidates.length === 0) return null;
+
+  // Among low-preference candidates, pick one that's a fresh mood (different from recent)
+  const recentMoods = recentlyPlayed.slice(0, 3).map(detectMood).filter(Boolean);
+  const freshMood = candidates.find(t => {
+    const m = detectMood(t);
+    return m && !recentMoods.includes(m);
+  });
+
+  if (freshMood) return freshMood;
+  return candidates[Math.floor(Math.random() * Math.min(candidates.length, 5))];
+}
+
 // Main export: Party DJ next-track selection
-// Returns up to `count` tracks that would make a great next set — varied, fresh, flowing.
-export function getPartyDJRecommendations(currentTrack, allTracks, recentlyPlayed = [], count = 8) {
+// injectTasteBreaker: if true, forces a discovery pick instead of a preference-based one
+export function getPartyDJRecommendations(
+  currentTrack,
+  allTracks,
+  recentlyPlayed = [],
+  count = 8,
+  injectTasteBreaker = false
+) {
   if (!currentTrack || !allTracks.length) return [];
+
+  const prefs = loadPreferences();
 
   const playedIds = new Set(recentlyPlayed.map(t => t.id));
   playedIds.add(currentTrack.id);
 
-  // Candidates = tracks not recently played
   const candidates = allTracks.filter(t => !playedIds.has(t.id));
 
-  // If library is small and we've exhausted unplayed tracks, allow played ones back in
-  // but still exclude the immediate last 5 to avoid jarring repeats
   const lastFiveIds = new Set(recentlyPlayed.slice(0, 5).map(t => t.id));
   const relaxedPool = allTracks.filter(t => t.id !== currentTrack.id && !lastFiveIds.has(t.id));
-
-  // Last resort for very small libraries: exclude only the immediately previous track
   const finalFallback = allTracks.filter(t => t.id !== currentTrack.id && t.id !== recentlyPlayed[0]?.id);
 
   const pool = candidates.length >= count
@@ -105,31 +152,45 @@ export function getPartyDJRecommendations(currentTrack, allTracks, recentlyPlaye
 
   const currentMood = detectMood(currentTrack);
 
+  // Taste breaker injection: replace the last slot with a discovery track
+  if (injectTasteBreaker && count > 1) {
+    const breaker = pickTasteBreaker(pool, recentlyPlayed, prefs);
+    if (breaker) {
+      const normalPool = pool.filter(t => t.id !== breaker.id);
+      const normalRecs = getPartyDJRecommendations(
+        currentTrack, allTracks, recentlyPlayed, count - 1, false
+      );
+      // Insert breaker near the end (not last — avoid jarring end)
+      const insertAt = Math.max(0, normalRecs.length - 2);
+      const result = [...normalRecs];
+      result.splice(insertAt, 0, breaker);
+      return result.slice(0, count);
+    }
+  }
+
   const scored = pool.map(track => ({
     ...track,
-    _score: scoreForPartyDJ(track, recentlyPlayed, currentMood),
+    _score: scoreForPartyDJ(track, recentlyPlayed, currentMood, prefs),
   }));
 
-  // Sort by score descending, then pick top results
   scored.sort((a, b) => b._score - a._score);
 
-  // Take top 2× the count, then randomise slightly to avoid mechanical predictability
+  // Take top 2× count, shuffle slightly to avoid mechanical predictability
   const topPool = scored.slice(0, count * 2);
   topPool.sort(() => Math.random() - 0.5);
 
-  // Final selection: ensure no two adjacent tracks are the same artist
+  // Final selection: no two adjacent tracks from same artist
   const selected = [];
   const used = new Set();
   for (const track of topPool) {
     if (selected.length >= count) break;
     if (used.has(track.id)) continue;
-    const lastSelected = selected[selected.length - 1];
-    if (lastSelected?.artist === track.artist) continue; // avoid adjacent same artist
+    if (selected[selected.length - 1]?.artist === track.artist) continue;
     selected.push(track);
     used.add(track.id);
   }
 
-  // If strict filtering left us short, fill with remaining top candidates
+  // Fill remainder if strict filtering left us short
   if (selected.length < count) {
     for (const track of scored) {
       if (selected.length >= count) break;
@@ -140,11 +201,10 @@ export function getPartyDJRecommendations(currentTrack, allTracks, recentlyPlaye
     }
   }
 
-  // Strip the internal score field before returning
   return selected.map(({ _score, ...track }) => track);
 }
 
-// Kept for backward compatibility — routes through Party DJ engine
+// Kept for backward compatibility
 export function getSequentialRecommendations(currentTrack, allTracks, playedTracks = []) {
   return getPartyDJRecommendations(currentTrack, allTracks, playedTracks, 5);
 }
@@ -156,10 +216,6 @@ export function buildMix(tracks, genreOrMood, maxTracks = 30) {
     const text = `${t.genre || ''} ${t.title} ${t.album}`.toLowerCase();
     return text.includes(keyword);
   });
-
-  // Shuffle for daily freshness
   const shuffled = [...matching].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, maxTracks);
 }
-
-export { detectMood };

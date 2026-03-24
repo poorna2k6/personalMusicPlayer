@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState } from 'react';
-import { getAudioUrl, getCoverUrl } from '../api';
+import { getAudioUrl, getCoverUrl, recordPlayHistory } from '../api';
+import { useAuth } from '../context/AuthContext';
 
 // Extracts dominant color from an img element using a hidden canvas
 function extractDominantColor(imgSrc, callback) {
@@ -35,11 +36,13 @@ const CROSSFADE_MS = 60; // ms per step → 1.2 s total
 export default function Player({ player }) {
   const audioRef = useRef(null);
   const fadeIntervalRef = useRef(null);
+  const playStartRef = useRef(null); // timestamp (ms) when current track started playing
   const [playbackError, setPlaybackError] = useState(null);
   const [accentColor, setAccentColor] = useState(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showUpNext, setShowUpNext] = useState(false);
   const [titleKey, setTitleKey] = useState(0); // triggers fade animation on track change
+  const { token } = useAuth();
   const {
     currentTrack, isPlaying, volume, currentTime, duration,
     shuffle, repeat, djMode, queue, currentIndex,
@@ -48,6 +51,37 @@ export default function Player({ player }) {
     toggleShuffle, toggleRepeat, toggleDjMode,
     removeFromQueue,
   } = player;
+
+  // Track when the current track started playing so we can compute completion %
+  useEffect(() => {
+    if (isPlaying && currentTrack) {
+      playStartRef.current = Date.now();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTrack?.id]); // reset on track change, not on pause/resume
+
+  // Build play signals and send history to backend — fire-and-forget
+  function recordCurrentTrack(audioCurrentTime, audioDuration) {
+    if (!currentTrack || !token) return;
+    const elapsed = playStartRef.current
+      ? Math.round((Date.now() - playStartRef.current) / 1000)
+      : Math.round(audioCurrentTime);
+    const trackDuration = audioDuration || currentTrack.duration || 0;
+    const completionPct = trackDuration > 0 ? Math.min(1, audioCurrentTime / trackDuration) : 0;
+    const skipped = completionPct < 0.5;
+    const hour = new Date().getHours();
+    const timeOfDay =
+      hour < 5  ? 'night' :
+      hour < 12 ? 'morning' :
+      hour < 17 ? 'afternoon' :
+      hour < 21 ? 'evening' : 'night';
+    recordPlayHistory(token, currentTrack.id, {
+      playDuration: elapsed,
+      completionPct: Math.round(completionPct * 100) / 100,
+      skipped,
+      timeOfDay,
+    });
+  }
 
   // Extract dominant color from album art on track change
   useEffect(() => {
@@ -155,10 +189,12 @@ export default function Player({ player }) {
           break;
         case 'ArrowRight':
           e.preventDefault();
+          recordCurrentTrack(audioRef.current?.currentTime || 0, audioRef.current?.duration || 0);
           nextTrack(audioRef.current?.currentTime || 0, audioRef.current?.duration || 0);
           break;
         case 'ArrowLeft':
           e.preventDefault();
+          recordCurrentTrack(audioRef.current?.currentTime || 0, audioRef.current?.duration || 0);
           prevTrack();
           break;
         case 'ArrowUp':
@@ -198,8 +234,10 @@ export default function Player({ player }) {
       audioRef.current.currentTime = 0;
       audioRef.current.play().catch(() => {});
     } else {
-      // Pass full duration as currentTime to signal natural completion (not a skip)
-      nextTrack(audioRef.current?.duration || 0, audioRef.current?.duration || 0);
+      const dur = audioRef.current?.duration || 0;
+      // Natural completion — completionPct = 1.0
+      recordCurrentTrack(dur, dur);
+      nextTrack(dur, dur);
     }
   };
 
@@ -387,7 +425,7 @@ export default function Player({ player }) {
             </svg>
           </button>
 
-          <button onClick={prevTrack} className="p-1 text-surface-300 hover:text-white transition-colors" title="Previous">
+          <button onClick={() => { recordCurrentTrack(audioRef.current?.currentTime || 0, audioRef.current?.duration || 0); prevTrack(); }} className="p-1 text-surface-300 hover:text-white transition-colors" title="Previous">
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
               <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
             </svg>
@@ -409,7 +447,7 @@ export default function Player({ player }) {
             )}
           </button>
 
-          <button onClick={() => nextTrack(audioRef.current?.currentTime || 0, audioRef.current?.duration || 0)} className="p-1 text-surface-300 hover:text-white transition-colors" title="Next">
+          <button onClick={() => { recordCurrentTrack(audioRef.current?.currentTime || 0, audioRef.current?.duration || 0); nextTrack(audioRef.current?.currentTime || 0, audioRef.current?.duration || 0); }} className="p-1 text-surface-300 hover:text-white transition-colors" title="Next">
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
               <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
             </svg>

@@ -117,6 +117,24 @@ function initDb() {
     CREATE INDEX IF NOT EXISTS idx_user_history_played ON user_history(user_id, played_at);
   `);
 
+  // --- Schema migrations (safe to run on every startup) ---
+
+  // user_history: add rich play-signal columns if they don't exist yet
+  const histCols = db.prepare('PRAGMA table_info(user_history)').all().map(c => c.name);
+  if (!histCols.includes('play_duration')) {
+    db.exec('ALTER TABLE user_history ADD COLUMN play_duration REAL DEFAULT 0');
+    db.exec('ALTER TABLE user_history ADD COLUMN completion_pct REAL DEFAULT 0');
+    db.exec('ALTER TABLE user_history ADD COLUMN skipped INTEGER DEFAULT 0');
+    db.exec('ALTER TABLE user_history ADD COLUMN time_of_day TEXT');
+  }
+
+  // user_preferences: add skip tracking and time-of-day affinity
+  const prefCols = db.prepare('PRAGMA table_info(user_preferences)').all().map(c => c.name);
+  if (!prefCols.includes('skip_counts')) {
+    db.exec("ALTER TABLE user_preferences ADD COLUMN skip_counts TEXT DEFAULT '{}'");
+    db.exec("ALTER TABLE user_preferences ADD COLUMN time_affinities TEXT DEFAULT '{}'");
+  }
+
   return db;
 }
 

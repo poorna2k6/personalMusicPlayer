@@ -4,6 +4,7 @@ import { getPartyDJRecommendations } from '../utils/recommendations';
 const STORAGE_KEY = 'music-player-state';
 const STATE_VERSION = 3; // Bump this to force-clear stale localStorage on breaking changes
 const MAX_SAVED_QUEUE = 50; // Cap queue saved to localStorage to avoid quota errors
+const TASTE_BREAKER_INTERVAL = 7; // Inject a discovery track every N DJ tracks
 
 function loadState() {
   try {
@@ -65,6 +66,7 @@ export function usePlayerStore() {
   const [allTracks, setAllTracks] = useState([]);
   const [playedTracks, setPlayedTracks] = useState([]);
   const [recentlyPlayed, setRecentlyPlayed] = useState(saved.current?.recentlyPlayed || []);
+  const djTrackCountRef = useRef(0); // count DJ-mode tracks played; triggers taste breaker
 
   const currentTrack = queue[currentIndex] ?? null;
 
@@ -134,6 +136,7 @@ export function usePlayerStore() {
         const updated = [currentTrack, ...prev.filter(t => t.id !== currentTrack.id)];
         return updated.slice(0, 50);
       });
+      if (djMode) djTrackCountRef.current += 1;
     }
 
     if (shuffle) {
@@ -149,7 +152,8 @@ export function usePlayerStore() {
     } else {
       // End of queue — if DJ mode is on, fetch recommendations
       if (djMode && currentTrack && allTracks.length > 0) {
-        const recs = getPartyDJRecommendations(currentTrack, allTracks, playedTracks);
+        const breaker = djTrackCountRef.current > 0 && djTrackCountRef.current % TASTE_BREAKER_INTERVAL === 0;
+        const recs = getPartyDJRecommendations(currentTrack, allTracks, playedTracks, 8, breaker);
         if (recs.length > 0) {
           setQueue(prev => [...prev, ...recs]);
           setCurrentIndex(prev => prev + 1);
@@ -162,7 +166,8 @@ export function usePlayerStore() {
 
     // DJ mode: top-up queue before it runs dry (keep at least 3 tracks ahead)
     if (djMode && currentTrack && allTracks.length > 0 && (queue.length - currentIndex) <= 3) {
-      const recs = getPartyDJRecommendations(currentTrack, allTracks, playedTracks);
+      const breaker = djTrackCountRef.current > 0 && djTrackCountRef.current % TASTE_BREAKER_INTERVAL === 0;
+      const recs = getPartyDJRecommendations(currentTrack, allTracks, playedTracks, 8, breaker);
       if (recs.length > 0) {
         setQueue(prev => [...prev, ...recs]);
       }
@@ -202,7 +207,10 @@ export function usePlayerStore() {
   }, []);
 
   const toggleDjMode = useCallback(() => {
-    setDjMode(prev => !prev);
+    setDjMode(prev => {
+      if (prev) djTrackCountRef.current = 0; // reset taste-breaker counter on stop
+      return !prev;
+    });
   }, []);
 
   const updateAllTracks = useCallback((tracks) => {
