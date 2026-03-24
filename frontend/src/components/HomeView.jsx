@@ -3,6 +3,16 @@ import TrackRow from './TrackRow';
 import { useAuth } from '../context/AuthContext';
 import { getUserRecommendations, getUserHistory } from '../api';
 
+// Load genre preference weights from localStorage (written by usePlayerStore)
+function loadGenrePrefs() {
+  try {
+    const raw = localStorage.getItem('user-preferences');
+    return raw ? (JSON.parse(raw).genreWeights || {}) : {};
+  } catch {
+    return {};
+  }
+}
+
 const MIN_MIX_TRACKS = 3;
 
 // Seeded PRNG (Mulberry32) — same seed = same shuffle every time
@@ -100,11 +110,18 @@ export default function HomeView({ tracks, player, playlists, onUpdate }) {
   const greeting = getTimeGreeting();
   const hasLibrary = tracks.length > 0;
 
-  const dailyMixes = useMemo(() => (
-    MIX_DEFINITIONS
+  const dailyMixes = useMemo(() => {
+    const genrePrefs = loadGenrePrefs();
+    return MIX_DEFINITIONS
       .map(def => ({ ...def, tracks: buildMixTracks(tracks, def) }))
       .filter(mix => mix.tracks.length >= MIN_MIX_TRACKS)
-  ), [tracks]);
+      // Sort by user's genre preference weight — favourite genres appear first
+      .sort((a, b) => {
+        const scoreA = a.keywords.reduce((s, kw) => s + (genrePrefs[kw] || 0), 0);
+        const scoreB = b.keywords.reduce((s, kw) => s + (genrePrefs[kw] || 0), 0);
+        return scoreB - scoreA;
+      });
+  }, [tracks]);
 
   const allMix = useMemo(() => (
     hasLibrary

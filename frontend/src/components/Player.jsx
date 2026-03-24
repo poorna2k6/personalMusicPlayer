@@ -218,7 +218,8 @@ export default function Player({ player }) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentTrack, togglePlay, nextTrack, prevTrack, setVolume, volume]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTrack, togglePlay, nextTrack, prevTrack, setVolume, volume, token]);
 
   useEffect(() => {
     const audio = audioRef.current;

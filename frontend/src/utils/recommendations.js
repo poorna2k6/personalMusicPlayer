@@ -156,11 +156,11 @@ export function getPartyDJRecommendations(
   if (injectTasteBreaker && count > 1) {
     const breaker = pickTasteBreaker(pool, recentlyPlayed, prefs);
     if (breaker) {
-      const normalPool = pool.filter(t => t.id !== breaker.id);
+      // Exclude the breaker from the normal batch so it doesn't appear twice
       const normalRecs = getPartyDJRecommendations(
-        currentTrack, allTracks, recentlyPlayed, count - 1, false
+        currentTrack, allTracks, [...recentlyPlayed, breaker], count - 1, false
       );
-      // Insert breaker near the end (not last — avoid jarring end)
+      // Insert breaker near the end (not last — avoid a jarring mood jump at tail)
       const insertAt = Math.max(0, normalRecs.length - 2);
       const result = [...normalRecs];
       result.splice(insertAt, 0, breaker);
