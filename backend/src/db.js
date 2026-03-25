@@ -76,6 +76,34 @@ function initDb() {
       FOREIGN KEY (session_id) REFERENCES analytics_sessions(id)
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      google_id TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      name TEXT NOT NULL,
+      picture TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      last_login TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS user_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      track_id TEXT NOT NULL,
+      played_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL UNIQUE,
+      genre_weights TEXT DEFAULT '{}',
+      artist_weights TEXT DEFAULT '{}',
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
     CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album);
     CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre);
@@ -85,7 +113,27 @@ function initDb() {
     CREATE INDEX IF NOT EXISTS idx_analytics_timestamp ON analytics_events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_analytics_type_timestamp ON analytics_events(event_type, timestamp);
     CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON analytics_sessions(start_time);
+    CREATE INDEX IF NOT EXISTS idx_user_history_user ON user_history(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_history_played ON user_history(user_id, played_at);
   `);
+
+  // --- Schema migrations (safe to run on every startup) ---
+
+  // user_history: add rich play-signal columns if they don't exist yet
+  const histCols = db.prepare('PRAGMA table_info(user_history)').all().map(c => c.name);
+  if (!histCols.includes('play_duration')) {
+    db.exec('ALTER TABLE user_history ADD COLUMN play_duration REAL DEFAULT 0');
+    db.exec('ALTER TABLE user_history ADD COLUMN completion_pct REAL DEFAULT 0');
+    db.exec('ALTER TABLE user_history ADD COLUMN skipped INTEGER DEFAULT 0');
+    db.exec('ALTER TABLE user_history ADD COLUMN time_of_day TEXT');
+  }
+
+  // user_preferences: add skip tracking and time-of-day affinity
+  const prefCols = db.prepare('PRAGMA table_info(user_preferences)').all().map(c => c.name);
+  if (!prefCols.includes('skip_counts')) {
+    db.exec("ALTER TABLE user_preferences ADD COLUMN skip_counts TEXT DEFAULT '{}'");
+    db.exec("ALTER TABLE user_preferences ADD COLUMN time_affinities TEXT DEFAULT '{}'");
+  }
 
   return db;
 }

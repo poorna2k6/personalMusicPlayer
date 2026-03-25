@@ -3,7 +3,8 @@ import { getPartyDJRecommendations } from '../utils/recommendations';
 
 const STORAGE_KEY = 'music-player-state';
 const STATE_VERSION = 3; // Bump this to force-clear stale localStorage on breaking changes
-const MAX_SAVED_QUEUE = 30; // Cap queue saved to localStorage to avoid quota errors
+const MAX_SAVED_QUEUE = 50; // Cap queue saved to localStorage to avoid quota errors
+const TASTE_BREAKER_INTERVAL = 7; // Inject a discovery track every N DJ tracks
 
 function loadState() {
   try {
@@ -65,6 +66,7 @@ export function usePlayerStore() {
   const [allTracks, setAllTracks] = useState([]);
   const [playedTracks, setPlayedTracks] = useState([]);
   const [recentlyPlayed, setRecentlyPlayed] = useState(saved.current?.recentlyPlayed || []);
+  const djTrackCountRef = useRef(0); // count DJ-mode tracks played; triggers taste breaker
 
   const currentTrack = queue[currentIndex] ?? null;
 
@@ -97,8 +99,36 @@ export function usePlayerStore() {
     setIsPlaying(prev => !prev);
   }, []);
 
-  const nextTrack = useCallback(() => {
+  const nextTrack = useCallback((currentTimeArg, durationArg) => {
     if (queue.length === 0) return;
+
+    // Track skip signal: if called manually before track ends, record completion %
+    if (currentTrack && durationArg > 0) {
+      const completionPct = Math.min(1, currentTimeArg / durationArg);
+      const wasSkipped = completionPct < 0.5;
+
+      // Update preference weights based on listening behavior
+      try {
+        const prefsRaw = localStorage.getItem('user-preferences');
+        const prefs = prefsRaw ? JSON.parse(prefsRaw) : { artistWeights: {}, genreWeights: {} };
+        const artist = currentTrack.artist;
+        const genre = currentTrack.genre;
+
+        const delta = wasSkipped ? -0.5 : completionPct >= 0.9 ? 1.0 : 0.3;
+
+        if (artist) {
+          prefs.artistWeights[artist] = Math.max(-5, Math.min(10,
+            (prefs.artistWeights[artist] || 0) + delta
+          ));
+        }
+        if (genre) {
+          prefs.genreWeights[genre] = Math.max(-5, Math.min(10,
+            (prefs.genreWeights[genre] || 0) + delta
+          ));
+        }
+        localStorage.setItem('user-preferences', JSON.stringify(prefs));
+      } catch { /* silently fail */ }
+    }
 
     // Track what was just played for DJ recommendations
     if (currentTrack) {
@@ -106,6 +136,7 @@ export function usePlayerStore() {
         const updated = [currentTrack, ...prev.filter(t => t.id !== currentTrack.id)];
         return updated.slice(0, 50);
       });
+      if (djMode) djTrackCountRef.current += 1;
     }
 
     if (shuffle) {
@@ -121,7 +152,8 @@ export function usePlayerStore() {
     } else {
       // End of queue — if DJ mode is on, fetch recommendations
       if (djMode && currentTrack && allTracks.length > 0) {
-        const recs = getPartyDJRecommendations(currentTrack, allTracks, playedTracks);
+        const breaker = djTrackCountRef.current > 0 && djTrackCountRef.current % TASTE_BREAKER_INTERVAL === 0;
+        const recs = getPartyDJRecommendations(currentTrack, allTracks, playedTracks, 8, breaker);
         if (recs.length > 0) {
           setQueue(prev => [...prev, ...recs]);
           setCurrentIndex(prev => prev + 1);
@@ -134,7 +166,8 @@ export function usePlayerStore() {
 
     // DJ mode: top-up queue before it runs dry (keep at least 3 tracks ahead)
     if (djMode && currentTrack && allTracks.length > 0 && (queue.length - currentIndex) <= 3) {
-      const recs = getPartyDJRecommendations(currentTrack, allTracks, playedTracks);
+      const breaker = djTrackCountRef.current > 0 && djTrackCountRef.current % TASTE_BREAKER_INTERVAL === 0;
+      const recs = getPartyDJRecommendations(currentTrack, allTracks, playedTracks, 8, breaker);
       if (recs.length > 0) {
         setQueue(prev => [...prev, ...recs]);
       }
@@ -161,16 +194,39 @@ export function usePlayerStore() {
   }, []);
 
   const addToQueue = useCallback((track) => {
-    setQueue(prev => [...prev, track]);
+    setQueue(prev => {
+      if (prev.some(t => t.id === track.id)) return prev;
+      return [...prev, track];
+    });
+  }, []);
+
+  const removeFromQueue = useCallback((queueIndex) => {
+    setQueue(prev => prev.filter((_, idx) => idx !== queueIndex));
+    // If removing a track before currentIndex, shift the pointer down so current track stays
+    setCurrentIndex(prevIdx => queueIndex < prevIdx ? prevIdx - 1 : prevIdx);
   }, []);
 
   const toggleDjMode = useCallback(() => {
-    setDjMode(prev => !prev);
+    setDjMode(prev => {
+      if (prev) djTrackCountRef.current = 0; // reset taste-breaker counter on stop
+      return !prev;
+    });
   }, []);
 
   const updateAllTracks = useCallback((tracks) => {
     setAllTracks(tracks);
   }, []);
+
+  // On reload: if DJ mode was active but the saved queue is small, top it up automatically
+  useEffect(() => {
+    if (djMode && currentTrack && allTracks.length > 0 && queue.length - currentIndex <= 3) {
+      const recs = getPartyDJRecommendations(currentTrack, allTracks, playedTracks);
+      if (recs.length > 0) {
+        setQueue(prev => [...prev, ...recs]);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [djMode, allTracks.length]); // only fires when allTracks arrives after async load
 
   // Kick off a DJ session from the current track
   const startDjSession = useCallback((seedTrack, trackPool) => {
@@ -188,7 +244,7 @@ export function usePlayerStore() {
     shuffle, repeat, djMode, recentlyPlayed, allTracks,
     setVolume, setCurrentTime, setDuration, setIsPlaying,
     playTrack, playAll, togglePlay, nextTrack, prevTrack,
-    toggleShuffle, toggleRepeat, addToQueue,
+    toggleShuffle, toggleRepeat, addToQueue, removeFromQueue,
     toggleDjMode, updateAllTracks, startDjSession,
     // Keep backward compat alias
     smartAutoPlay: djMode,
